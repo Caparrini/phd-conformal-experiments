@@ -86,7 +86,7 @@ def _(cal_data, cfg, test_data, train_data):
 
 @app.cell
 def _(cfg):
-    from sklearn.preprocessing import OneHotEncoder#, StandardScaler
+    from sklearn.preprocessing import OneHotEncoder  # , StandardScaler
     from sklearn.compose import ColumnTransformer
     from sklearn.pipeline import Pipeline
     from xgboost import XGBClassifier
