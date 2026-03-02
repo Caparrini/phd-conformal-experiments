@@ -16,5 +16,8 @@ wheels/
 .env
 
 # .csv
-
+*.parquet
 *.csv
+
+# marimo
+__marimo__/
