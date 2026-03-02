@@ -98,9 +98,7 @@ class TestDownloadIfMissing:
             download_if_missing("https://example.com/data.csv", tmp_dest)
 
     @patch("dslib.data_utils.urllib.request.urlretrieve", side_effect=_fake_download)
-    def test_raises_on_hash_mismatch_after_download(
-        self, mock_urlretrieve, tmp_dest
-    ):
+    def test_raises_on_hash_mismatch_after_download(self, mock_urlretrieve, tmp_dest):
         with pytest.raises(ValueError, match="Hash mismatch"):
             download_if_missing(
                 "https://example.com/data.csv", tmp_dest, sha256="wrong_hash"

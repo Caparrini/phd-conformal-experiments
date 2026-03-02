@@ -73,9 +73,7 @@ class TestLogParamsFlat:
     def test_list_params(self, mock_mlflow):
         _log_params_flat({"alpha": [0.05, 0.10, 0.20]})
 
-        mock_mlflow.log_param.assert_called_once_with(
-            "alpha", "[0.05, 0.1, 0.2]"
-        )
+        mock_mlflow.log_param.assert_called_once_with("alpha", "[0.05, 0.1, 0.2]")
 
     @patch("dslib.tracking.mlflow")
     def test_empty_config(self, mock_mlflow):
@@ -147,9 +145,7 @@ class TestTrackedRun:
 
         mock_run = MagicMock()
         mock_run.info.run_id = "run-123"
-        mock_mlflow.start_run.return_value.__enter__ = MagicMock(
-            return_value=mock_run
-        )
+        mock_mlflow.start_run.return_value.__enter__ = MagicMock(return_value=mock_run)
         mock_mlflow.start_run.return_value.__exit__ = MagicMock(return_value=False)
 
         config = {"model": {"name": "xgb"}, "alpha": 0.10}
@@ -161,8 +157,7 @@ class TestTrackedRun:
         mock_mlflow.start_run.assert_called_once_with(run_name="test-run")
 
         tag_calls = {
-            call.args[0]: call.args[1]
-            for call in mock_mlflow.set_tag.call_args_list
+            call.args[0]: call.args[1] for call in mock_mlflow.set_tag.call_args_list
         }
         assert tag_calls["git_commit"] == "abc123"
         assert tag_calls["git_dirty"] is False
@@ -170,8 +165,7 @@ class TestTrackedRun:
         assert "data_hash" in tag_calls
 
         param_calls = {
-            call.args[0]: call.args[1]
-            for call in mock_mlflow.log_param.call_args_list
+            call.args[0]: call.args[1] for call in mock_mlflow.log_param.call_args_list
         }
         assert param_calls["model.name"] == "xgb"
         assert param_calls["alpha"] == 0.10
@@ -187,17 +181,14 @@ class TestTrackedRun:
 
         mock_run = MagicMock()
         mock_run.info.run_id = "run-456"
-        mock_mlflow.start_run.return_value.__enter__ = MagicMock(
-            return_value=mock_run
-        )
+        mock_mlflow.start_run.return_value.__enter__ = MagicMock(return_value=mock_run)
         mock_mlflow.start_run.return_value.__exit__ = MagicMock(return_value=False)
 
         with tracked_run({"seed": 42}, data_file, "exp"):
             pass
 
         tag_calls = {
-            call.args[0]: call.args[1]
-            for call in mock_mlflow.set_tag.call_args_list
+            call.args[0]: call.args[1] for call in mock_mlflow.set_tag.call_args_list
         }
         assert tag_calls["git_dirty"] is True
 
@@ -211,16 +202,13 @@ class TestTrackedRun:
 
         mock_run = MagicMock()
         mock_run.info.run_id = "run-789"
-        mock_mlflow.start_run.return_value.__enter__ = MagicMock(
-            return_value=mock_run
-        )
+        mock_mlflow.start_run.return_value.__enter__ = MagicMock(return_value=mock_run)
         mock_mlflow.start_run.return_value.__exit__ = MagicMock(return_value=False)
 
         with tracked_run({"seed": 42}, missing_file, "exp"):
             pass
 
         tag_calls = {
-            call.args[0]: call.args[1]
-            for call in mock_mlflow.set_tag.call_args_list
+            call.args[0]: call.args[1] for call in mock_mlflow.set_tag.call_args_list
         }
         assert tag_calls["data_hash"] == "file_not_found"

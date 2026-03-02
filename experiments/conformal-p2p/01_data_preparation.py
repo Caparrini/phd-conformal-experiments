@@ -105,17 +105,20 @@ def _(mo):
 @app.cell
 def _(df, pl):
     selected_columns = [
-        "fico_n", "dti_n", "loan_amnt", "revenue",
-        "emp_length", "purpose", "home_ownership_n",
-        "addr_state", "issue_d", "Default",
+        "fico_n",
+        "dti_n",
+        "loan_amnt",
+        "revenue",
+        "emp_length",
+        "purpose",
+        "home_ownership_n",
+        "addr_state",
+        "issue_d",
+        "Default",
     ]
 
-    df_clean = (
-        df
-        .select(selected_columns)
-        .with_columns(
-            pl.col("issue_d").str.to_date("%b-%Y")
-        )
+    df_clean = df.select(selected_columns).with_columns(
+        pl.col("issue_d").str.to_date("%b-%Y")
     )
     df_clean.schema
     return (df_clean,)
