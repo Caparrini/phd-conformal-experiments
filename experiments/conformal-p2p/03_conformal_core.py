@@ -128,6 +128,77 @@ def _(
         )
         mlflow.log_figure(fig, "singleton_confusion_matrix.png")
         plt.close(fig)
+        import matplotlib.pyplot as plt
+        from conformalpy.plots import (
+            plot_singleton_confusion_matrix,
+            plot_prediction_set_size_distribution,
+            plot_nonconformity_scores,
+            plot_set_size_vs_true_label,
+        )
+
+        # 1. Singleton confusion matrix
+        fig, _ = plot_singleton_confusion_matrix(
+            prediction_sets, y_test,
+            class_names={0: "approve", 1: "reject"},
+        )
+        mlflow.log_figure(fig, "singleton_confusion_matrix.png")
+        plt.close(fig)
+
+        # 2. Set size distribution
+        fig, _ = plot_prediction_set_size_distribution(prediction_sets)
+        type(fig)
+        mlflow.log_figure(fig, "prediction_set_size_distribution.png")
+        plt.close(fig)
+
+        # 3. Nonconformity scores
+        # y_proba_test = pipeline.predict_proba(X_test)
+        # scores_test = lac_nonconformity(y_test.values, y_proba_test)
+        # fig, _ = plot_nonconformity_scores(
+        #     y_cal, conf_clf._calibration_scores,
+        #     y_test, scores_test,
+        #     conf_clf.qhat_,
+        # )
+        # mlflow.log_figure(fig, "nonconformity_scores.png")
+        # plt.close(fig)
+
+        # 4. Set size vs true label
+        fig, _ = plot_set_size_vs_true_label(prediction_sets, y_test)
+        mlflow.log_figure(fig, "set_size_vs_true_label.png")
+        plt.close(fig)
+    return conf_clf, plt
+
+
+@app.cell
+def _():
+    import inspect, conformalpy
+    print(inspect.signature(conformalpy.plots.plot_coverage_by_alpha))
+    return
+
+
+@app.cell
+def _(X_test, conf_clf, mlflow, plt, y_test):
+    import numpy as np
+    from conformalpy.plots import plot_coverage_by_alpha
+
+    alphas = np.arange(0.01, 0.51, 0.01).tolist()
+
+    # Una sola llamada — devuelve (n_samples, n_classes, n_alphas) bool array
+    result = conf_clf.predict(X_test, alpha=alphas)
+
+    coverages = []
+    avg_sizes = []
+
+    for a_idx in range(len(alphas)):
+        sets_a = result[:, :, a_idx]  # (n_samples, n_classes) bool
+        # Coverage: true label included?
+        covered = sets_a[np.arange(len(y_test)), y_test.values.astype(int)]
+        coverages.append(float(np.mean(covered)))
+        # Avg set size
+        avg_sizes.append(float(np.mean(sets_a.sum(axis=1))))
+
+    fig_cov_by_alpha, _ = plot_coverage_by_alpha(alphas, coverages, widths=avg_sizes)
+    mlflow.log_figure(fig_cov_by_alpha, "coverage_by_alpha.png")
+    plt.close(fig_cov_by_alpha)
     return
 
 
