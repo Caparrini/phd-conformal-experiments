@@ -72,3 +72,71 @@ def download_if_missing(url: str, dest: str | Path, sha256: str | None = None) -
     size_mb = dest.stat().st_size / 1024 / 1024
     logger.info(f"Downloaded: {dest} ({size_mb:.1f} MB)")
     return dest
+
+
+def load_and_split(
+    data_path: str | Path,
+    date_column: str,
+    train_cutoff: str,
+    calibration_cutoff: str,
+    target: str,
+    features: list[str],
+    include_metadata: bool = False,
+) -> dict:
+    """
+    Load parquet and split into train/calibration/test by date.
+
+    Parameters
+    ----------
+    data_path : path to parquet file
+    date_column : column name with dates
+    train_cutoff : ISO date string for train/cal boundary
+    calibration_cutoff : ISO date string for cal/test boundary
+    target : target column name
+    features : list of feature column names
+    include_metadata : if True, include split statistics
+
+    Returns
+    -------
+    dict with 'train', 'calibration', 'test' as (X, y) tuples.
+    If include_metadata=True, also includes 'metadata' with split stats.
+    """
+    from datetime import date
+    from pathlib import Path
+    import polars as pl
+
+    df = pl.read_parquet(Path(data_path))
+    train_cutoff_date = date.fromisoformat(train_cutoff)
+    cal_cutoff_date = date.fromisoformat(calibration_cutoff)
+
+    train_data = df.filter(pl.col(date_column) <= train_cutoff_date)
+    cal_data = df.filter(
+        (pl.col(date_column) > train_cutoff_date)
+        & (pl.col(date_column) <= cal_cutoff_date)
+    )
+    test_data = df.filter(pl.col(date_column) > cal_cutoff_date)
+
+    def _to_xy(data):
+        X = data.select(features).to_pandas()
+        y = data[target].to_pandas()
+        return X, y
+
+    result = {
+        "train": _to_xy(train_data),
+        "calibration": _to_xy(cal_data),
+        "test": _to_xy(test_data),
+    }
+
+    if include_metadata:
+        total = df.shape[0]
+        result["metadata"] = {}
+        for name, data in [("train", train_data), ("calibration", cal_data), ("test", test_data)]:
+            result["metadata"][name] = {
+                "n_samples": data.shape[0],
+                "default_rate": float(data[target].mean()),
+                "date_from": str(data[date_column].min()),
+                "date_to": str(data[date_column].max()),
+                "pct_total": data.shape[0] / total,
+            }
+
+    return result

@@ -17,38 +17,28 @@ def _():
 
     with initialize_config_dir(config_dir=CONFIG_DIR, version_base=None):
         cfg = compose(config_name="config")
-    return EXPERIMENT_DIR, OmegaConf, cfg, mo, pl
+    return EXPERIMENT_DIR, OmegaConf, cfg, mo
 
 
 @app.cell
-def _(EXPERIMENT_DIR, cfg, pl):
-    from datetime import date
+def _(EXPERIMENT_DIR, cfg):
+    from dslib.data_utils import load_and_split
 
     data_path = EXPERIMENT_DIR / cfg.data.file
-    df = pl.read_parquet(data_path)
+    feature_cols = list(cfg.data.features.numerical) + list(cfg.data.features.categorical)
 
-    train_cutoff = date.fromisoformat(cfg.data.splits.train_cutoff)
-    cal_cutoff = date.fromisoformat(cfg.data.splits.calibration_cutoff)
-    date_col = cfg.data.splits.date_column
-
-    train_data = df.filter(pl.col(date_col) <= train_cutoff)
-    cal_data = df.filter(
-        (pl.col(date_col) > train_cutoff) & (pl.col(date_col) <= cal_cutoff)
-    )
-    test_data = df.filter(pl.col(date_col) > cal_cutoff)
-
-    feature_cols = list(cfg.data.features.numerical) + list(
-        cfg.data.features.categorical
+    splits = load_and_split(
+        data_path=data_path,
+        date_column=cfg.data.splits.date_column,
+        train_cutoff=cfg.data.splits.train_cutoff,
+        calibration_cutoff=cfg.data.splits.calibration_cutoff,
+        target=cfg.data.target,
+        features=feature_cols,
     )
 
-    X_train = train_data.select(feature_cols).to_pandas()
-    y_train = train_data[cfg.data.target].to_pandas()
-    X_cal = cal_data.select(feature_cols).to_pandas()
-    y_cal = cal_data[cfg.data.target].to_pandas()
-    X_test = test_data.select(feature_cols).to_pandas()
-    y_test = test_data[cfg.data.target].to_pandas()
-
-    X_train.shape, X_cal.shape, X_test.shape
+    X_train, y_train = splits["train"]
+    X_cal, y_cal = splits["calibration"]
+    X_test, y_test = splits["test"]
     return X_cal, X_test, data_path, y_cal, y_test
 
 
@@ -168,15 +158,15 @@ def _(
 
         import numpy as np
         from conformalpy.plots import plot_coverage_by_alpha
-    
+
         alphas = np.arange(0.01, 0.51, 0.01).tolist()
-    
+
         # Una sola llamada — devuelve (n_samples, n_classes, n_alphas) bool array
         result = conf_clf.predict(X_test, alpha=alphas)
-    
+
         coverages = []
         avg_sizes = []
-    
+
         for a_idx in range(len(alphas)):
             sets_a = result[:, :, a_idx]  # (n_samples, n_classes) bool
             # Coverage: true label included?
@@ -184,14 +174,14 @@ def _(
             coverages.append(float(np.mean(covered)))
             # Avg set size
             avg_sizes.append(float(np.mean(sets_a.sum(axis=1))))
-    
+
         fig_cov_by_alpha, _ = plot_coverage_by_alpha(alphas, coverages, widths=avg_sizes)
         mlflow.log_figure(fig_cov_by_alpha, "coverage_by_alpha.png")
         plt.close(fig_cov_by_alpha)
 
         import tempfile
         import json
-    
+
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=True) as f:
             json.dump(prediction_sets, f)
             f.flush()
