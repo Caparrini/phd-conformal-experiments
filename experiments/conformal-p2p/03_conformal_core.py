@@ -165,40 +165,29 @@ def _(
         fig, _ = plot_set_size_vs_true_label(prediction_sets, y_test)
         mlflow.log_figure(fig, "set_size_vs_true_label.png")
         plt.close(fig)
-    return conf_clf, plt
 
-
-@app.cell
-def _():
-    import inspect, conformalpy
-    print(inspect.signature(conformalpy.plots.plot_coverage_by_alpha))
-    return
-
-
-@app.cell
-def _(X_test, conf_clf, mlflow, plt, y_test):
-    import numpy as np
-    from conformalpy.plots import plot_coverage_by_alpha
-
-    alphas = np.arange(0.01, 0.51, 0.01).tolist()
-
-    # Una sola llamada — devuelve (n_samples, n_classes, n_alphas) bool array
-    result = conf_clf.predict(X_test, alpha=alphas)
-
-    coverages = []
-    avg_sizes = []
-
-    for a_idx in range(len(alphas)):
-        sets_a = result[:, :, a_idx]  # (n_samples, n_classes) bool
-        # Coverage: true label included?
-        covered = sets_a[np.arange(len(y_test)), y_test.values.astype(int)]
-        coverages.append(float(np.mean(covered)))
-        # Avg set size
-        avg_sizes.append(float(np.mean(sets_a.sum(axis=1))))
-
-    fig_cov_by_alpha, _ = plot_coverage_by_alpha(alphas, coverages, widths=avg_sizes)
-    mlflow.log_figure(fig_cov_by_alpha, "coverage_by_alpha.png")
-    plt.close(fig_cov_by_alpha)
+        import numpy as np
+        from conformalpy.plots import plot_coverage_by_alpha
+    
+        alphas = np.arange(0.01, 0.51, 0.01).tolist()
+    
+        # Una sola llamada — devuelve (n_samples, n_classes, n_alphas) bool array
+        result = conf_clf.predict(X_test, alpha=alphas)
+    
+        coverages = []
+        avg_sizes = []
+    
+        for a_idx in range(len(alphas)):
+            sets_a = result[:, :, a_idx]  # (n_samples, n_classes) bool
+            # Coverage: true label included?
+            covered = sets_a[np.arange(len(y_test)), y_test.values.astype(int)]
+            coverages.append(float(np.mean(covered)))
+            # Avg set size
+            avg_sizes.append(float(np.mean(sets_a.sum(axis=1))))
+    
+        fig_cov_by_alpha, _ = plot_coverage_by_alpha(alphas, coverages, widths=avg_sizes)
+        mlflow.log_figure(fig_cov_by_alpha, "coverage_by_alpha.png")
+        plt.close(fig_cov_by_alpha)
     return
 
 
