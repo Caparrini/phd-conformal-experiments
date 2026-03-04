@@ -9,7 +9,6 @@ def _():
     import marimo as mo
     from pathlib import Path
     import numpy as np
-    import polars as pl
     import matplotlib.pyplot as plt
     import mlflow
     import json

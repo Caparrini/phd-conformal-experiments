@@ -8,7 +8,6 @@ app = marimo.App(width="medium")
 def _():
     import marimo as mo
     from pathlib import Path
-    import polars as pl
     from hydra import initialize_config_dir, compose
     from omegaconf import OmegaConf
 
@@ -122,7 +121,6 @@ def _(
         from conformalpy.plots import (
             plot_singleton_confusion_matrix,
             plot_prediction_set_size_distribution,
-            plot_nonconformity_scores,
             plot_set_size_vs_true_label,
         )
 
