@@ -188,6 +188,14 @@ def _(
         fig_cov_by_alpha, _ = plot_coverage_by_alpha(alphas, coverages, widths=avg_sizes)
         mlflow.log_figure(fig_cov_by_alpha, "coverage_by_alpha.png")
         plt.close(fig_cov_by_alpha)
+
+        import tempfile
+        import json
+    
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=True) as f:
+            json.dump(prediction_sets, f)
+            f.flush()
+            mlflow.log_artifact(f.name, artifact_path="outputs")
     return
 
 
