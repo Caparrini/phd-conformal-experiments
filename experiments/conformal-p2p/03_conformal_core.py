@@ -180,12 +180,14 @@ def _(
         plt.close(fig_cov_by_alpha)
 
         import tempfile
+        import os
         import json
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=True) as f:
-            json.dump(prediction_sets, f)
-            f.flush()
-            mlflow.log_artifact(f.name, artifact_path="outputs")
+    
+        with tempfile.TemporaryDirectory() as tmpdir:
+            filepath = os.path.join(tmpdir, "prediction_sets.json")
+            with open(filepath, "w") as f:
+                json.dump(prediction_sets, f)
+            mlflow.log_artifact(filepath, artifact_path="outputs")
     return
 
 
