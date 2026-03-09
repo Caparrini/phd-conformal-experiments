@@ -130,7 +130,7 @@ def _(
             f"{prefix}recall_macro": recall_score(y, pred, average="macro"),
         }
 
-    mlflow.autolog()
+    mlflow.sklearn.autolog()
     config_dict = OmegaConf.to_container(cfg, resolve=True)
 
     with tracked_run(config_dict, data_path, cfg.experiment.name, run_name="credit-card-xgboost"):

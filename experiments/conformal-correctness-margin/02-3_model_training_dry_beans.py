@@ -135,7 +135,7 @@ def _(
             f"{prefix}f1_macro": f1_score(y, pred, average="macro"),
         }
 
-    mlflow.autolog()
+    mlflow.sklearn.autolog()
     config_dict = OmegaConf.to_container(cfg, resolve=True)
 
     with tracked_run(config_dict, data_path, cfg.experiment.name, run_name="dry-beans-xgboost"):
