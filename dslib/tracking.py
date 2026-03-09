@@ -24,13 +24,19 @@ References:
 """
 
 import hashlib
+import os
 import subprocess
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+from uuid import uuid4
 
+import boto3
 import mlflow
 from loguru import logger
+from mlflow import MlflowClient
+from mlflow.entities import ViewType
 
 
 def _get_git_commit() -> str:
@@ -173,3 +179,88 @@ def tracked_run(
         yield run
 
     logger.info(f"Finished MLflow run: {run.info.run_id}")
+
+
+def purge_experiment(
+    experiment_name: str,
+    *,
+    tracking_uri: str | None = None,
+) -> None:
+    """Completely remove an MLflow experiment, freeing its name for reuse.
+
+    MLflow's default delete is a soft-delete that keeps the name reserved.
+    This function renames the experiment to a UUID first (freeing the name
+    immediately), deletes all artifacts from MinIO/S3, soft-deletes all runs,
+    and finally soft-deletes the experiment itself.
+
+    Parameters
+    ----------
+    experiment_name : str
+        Name of the experiment to purge.
+    tracking_uri : str, optional
+        MLflow tracking URI. If None, uses the current environment setting.
+
+    Raises
+    ------
+    ValueError
+        If no experiment with the given name exists.
+    """
+    if tracking_uri is not None:
+        mlflow.set_tracking_uri(tracking_uri)
+
+    client = MlflowClient()
+    experiment = client.get_experiment_by_name(experiment_name)
+    if experiment is None:
+        raise ValueError(f"Experiment '{experiment_name}' not found.")
+
+    exp_id = experiment.experiment_id
+
+    # Step 1: rename to UUID → original name freed immediately
+    client.rename_experiment(exp_id, str(uuid4()))
+
+    # Step 2: collect all runs (active + deleted)
+    runs = client.search_runs(
+        experiment_ids=[exp_id],
+        run_view_type=ViewType.ALL,
+    )
+
+    # Step 3: delete artifacts from MinIO/S3
+    try:
+        if runs:
+            artifact_uri = runs[0].info.artifact_uri  # e.g. s3://mlflow/<exp_id>/<run_id>/artifacts
+            parsed = urlparse(artifact_uri)
+            bucket = parsed.netloc
+            # prefix is everything up to (and including) the experiment_id segment
+            prefix = f"{exp_id}/"
+
+            s3 = boto3.client(
+                "s3",
+                endpoint_url=os.environ.get("MLFLOW_S3_ENDPOINT_URL"),
+            )
+            paginator = s3.get_paginator("list_objects_v2")
+            keys_to_delete: list[dict] = []
+            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+                for obj in page.get("Contents", []):
+                    keys_to_delete.append({"Key": obj["Key"]})
+                    if len(keys_to_delete) == 1000:
+                        s3.delete_objects(
+                            Bucket=bucket,
+                            Delete={"Objects": keys_to_delete},
+                        )
+                        keys_to_delete = []
+            if keys_to_delete:
+                s3.delete_objects(
+                    Bucket=bucket,
+                    Delete={"Objects": keys_to_delete},
+                )
+    except Exception as exc:
+        logger.warning(f"Could not delete artifacts from MinIO (skipping): {exc}")
+
+    # Step 4: soft-delete all runs
+    for run in runs:
+        client.delete_run(run.info.run_id)
+
+    # Step 5: soft-delete the experiment (now named UUID, invisible forever)
+    client.delete_experiment(exp_id)
+
+    logger.info(f"Experiment '{experiment_name}' purged (id={exp_id})")
