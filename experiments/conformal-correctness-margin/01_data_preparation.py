@@ -143,6 +143,26 @@ def _(credit_raw, pl):
 
     df_credit = pl.from_pandas(credit_raw.data).rename(CREDIT_COLUMNS)
 
+    # Remap integer-encoded categoricals to human-readable string labels.
+    # Cast to String first so replace operates on str keys, avoiding i64 dtype coercion.
+    _PAY_OLD = [str(v) for v in [-2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8]]
+    _PAY_NEW = ["No consumption", "Paid full", "Min. paid",
+                "1m late", "2m late", "3m late", "4m late",
+                "5m late", "6m late", "7m late", "8m late"]
+
+    df_credit = df_credit.with_columns([
+        pl.col("sex").cast(pl.String).replace({"1": "Male", "2": "Female"}),
+        pl.col("education").cast(pl.String).replace(
+            {"0": "Unknown", "1": "Graduate", "2": "University",
+             "3": "High School", "4": "Others", "5": "Unknown", "6": "Unknown"}
+        ),
+        pl.col("marriage").cast(pl.String).replace(
+            {"0": "Others", "1": "Married", "2": "Single", "3": "Others"}
+        ),
+        *[pl.col(f"pay_{m}").cast(pl.String).replace(dict(zip(_PAY_OLD, _PAY_NEW)))
+          for m in ["0", "2", "3", "4", "5", "6"]],
+    ])
+
     # Encode target: categorical '0'/'1' -> int 0/1
     df_credit = df_credit.with_columns(
         pl.Series("default", credit_raw.target.astype(int))
