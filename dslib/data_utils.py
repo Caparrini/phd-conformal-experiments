@@ -6,6 +6,9 @@ import urllib.request
 from urllib.error import HTTPError, URLError
 
 from loguru import logger
+import numpy as np
+import polars as pl
+from sklearn.model_selection import train_test_split
 
 
 def _verify_hash(path: Path, expected_sha256: str) -> bool:
@@ -137,6 +140,92 @@ def load_and_split(
                 "date_from": str(data[date_column].min()),
                 "date_to": str(data[date_column].max()),
                 "pct_total": data.shape[0] / total,
+            }
+
+    return result
+
+
+def stratified_split(
+    data_path: str | Path,
+    target: str,
+    features: list[str],
+    train_size: float = 0.6,
+    calibration_size: float = 0.2,
+    seed: int = 42,
+    include_metadata: bool = False,
+) -> dict:
+    """
+    Load parquet and split into train/calibration/test with stratification.
+
+    Parameters
+    ----------
+    data_path : str or Path
+        Path to parquet file.
+    target : str
+        Target column name.
+    features : list of str
+        List of feature column names.
+    train_size : float
+        Fraction of data for training (default 0.6).
+    calibration_size : float
+        Fraction of data for calibration (default 0.2).
+    seed : int
+        Random seed for reproducibility.
+    include_metadata : bool
+        If True, include split statistics in the result.
+
+    Returns
+    -------
+    dict
+        Keys 'train', 'calibration', 'test' as (X, y) tuples of pandas
+        DataFrame/Series. If include_metadata=True, also includes 'metadata'.
+
+    Raises
+    ------
+    ValueError
+        If train_size + calibration_size >= 1.0.
+    """
+    if train_size + calibration_size >= 1.0:
+        raise ValueError(
+            f"train_size + calibration_size must be < 1.0, "
+            f"got {train_size} + {calibration_size} = {train_size + calibration_size}"
+        )
+
+    df = pl.read_parquet(Path(data_path))
+    X_all = df.select(features).to_pandas()
+    y_all = df[target].to_pandas()
+
+    # First split: train vs (calibration + test)
+    rest_size = 1.0 - train_size
+    X_train, X_rest, y_train, y_rest = train_test_split(
+        X_all, y_all, test_size=rest_size, stratify=y_all, random_state=seed
+    )
+
+    # Second split: calibration vs test from the rest
+    cal_fraction = calibration_size / rest_size
+    X_cal, X_test, y_cal, y_test = train_test_split(
+        X_rest, y_rest, test_size=1.0 - cal_fraction, stratify=y_rest, random_state=seed
+    )
+
+    result = {
+        "train": (X_train, y_train),
+        "calibration": (X_cal, y_cal),
+        "test": (X_test, y_test),
+    }
+
+    if include_metadata:
+        total = len(y_all)
+        n_unique = y_all.nunique()
+        result["metadata"] = {}
+        for name, y_split in [("train", y_train), ("calibration", y_cal), ("test", y_test)]:
+            if n_unique <= 2:
+                target_rate = float(np.mean(y_split))
+            else:
+                target_rate = y_split.value_counts(normalize=True).to_dict()
+            result["metadata"][name] = {
+                "n_samples": len(y_split),
+                "target_rate": target_rate,
+                "pct_total": len(y_split) / total,
             }
 
     return result
