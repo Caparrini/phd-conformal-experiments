@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ experiment_name }} — Experiment Report</title>
+  <style>
+    :root {
+      --primary:   #2c3e50;
+      --accent:    #2980b9;
+      --success:   #27ae60;
+      --warning:   #e67e22;
+      --danger:    #c0392b;
+      --light:     #ecf0f1;
+      --border:    #bdc3c7;
+      --text:      #2c3e50;
+      --muted:     #7f8c8d;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--text);
+      background: #f5f6f7;
+      padding: 2rem;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      background: #fff;
+      padding: 2.5rem 3rem;
+      border-radius: 6px;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.1);
+    }
+
+    h1 { font-size: 1.7rem; color: var(--primary); margin-bottom: 0.4rem; }
+    h2 {
+      font-size: 1.25rem; color: var(--primary);
+      margin: 2.5rem 0 0.8rem;
+      border-bottom: 2px solid var(--accent);
+      padding-bottom: 0.3rem;
+    }
+    h3 { font-size: 1.05rem; color: var(--primary); margin: 1.6rem 0 0.5rem; }
+
+    .meta {
+      font-size: 0.82rem;
+      color: var(--muted);
+      margin-bottom: 2rem;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .meta span { margin-right: 1.5rem; }
+    .meta code {
+      background: var(--light); padding: 0.1em 0.35em;
+      border-radius: 3px; font-size: 0.9em;
+    }
+
+    .toc {
+      background: var(--light);
+      padding: 0.8rem 1.5rem;
+      border-radius: 4px;
+      margin-bottom: 2.5rem;
+    }
+    .toc h3 { margin-top: 0; margin-bottom: 0.4rem; font-size: 0.9rem; color: var(--muted); }
+    .toc ul { list-style: none; display: flex; flex-wrap: wrap; gap: 0.3rem 1.5rem; }
+    .toc a { color: var(--accent); text-decoration: none; }
+    .toc a:hover { text-decoration: underline; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0.6rem 0 1.2rem;
+      font-size: 0.88rem;
+    }
+    th {
+      background: var(--primary);
+      color: #fff;
+      padding: 0.45rem 0.8rem;
+      text-align: left;
+      font-weight: 600;
+      font-size: 0.83rem;
+    }
+    td { padding: 0.38rem 0.8rem; border-bottom: 1px solid var(--border); }
+    tr:nth-child(even) td { background: #f8f8f8; }
+    tr:hover td { background: #eef5fb; }
+
+    .badge {
+      display: inline-block;
+      padding: 0.1em 0.5em;
+      border-radius: 3px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      vertical-align: middle;
+    }
+    .badge-binary     { background: #d5e8f5; color: #1a6ca8; }
+    .badge-multiclass { background: #d5f5e3; color: #1a7a3c; }
+
+    .interp {
+      font-size: 0.86rem;
+      color: #555;
+      margin: 0.4rem 0 1rem;
+      font-style: italic;
+      padding: 0.45rem 0.9rem;
+      border-left: 3px solid var(--border);
+      background: #fafafa;
+    }
+
+    .flag-ok      { color: var(--success); font-weight: 600; }
+    .flag-warning { color: var(--warning); font-weight: 600; }
+    .flag-danger  { color: var(--danger);  font-weight: 600; }
+
+    .metric-highlight { font-weight: 600; color: var(--primary); }
+
+    .missing-run {
+      padding: 0.6rem 1rem;
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      color: #856404;
+      margin-bottom: 1rem;
+    }
+
+    .figures { margin-top: 0.5rem; }
+
+    .figure-block { margin: 1.8rem 0; }
+
+    .figure-block p.caption {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 0.35rem;
+      text-align: center;
+      font-style: italic;
+    }
+
+    .figure-missing {
+      padding: 0.8rem 1rem;
+      background: #fff8e1;
+      border: 1px dashed var(--warning);
+      border-radius: 4px;
+      color: var(--muted);
+      font-size: 0.83rem;
+      text-align: center;
+      margin: 1rem 0;
+    }
+
+    img {
+      max-width: 800px;
+      width: 100%;
+      height: auto;
+      display: block;
+      margin: 0 auto;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    .section-divider {
+      border: none;
+      border-top: 3px solid var(--light);
+      margin: 3rem 0;
+    }
+
+    .dataset-section { margin-bottom: 1rem; }
+
+    /* ── 2-column / 3-column image grids ──────────────────────────────── */
+    .figure-grid {
+      display: grid;
+      gap: 1.2rem;
+      margin: 1rem 0;
+      align-items: start;
+    }
+    .figure-grid-2 { grid-template-columns: 1fr 1fr; }
+    .figure-grid-3 { grid-template-columns: repeat(3, 1fr); }
+    .figure-grid .figure-block { margin: 0; }
+
+    /* ── Lightbox overlay ──────────────────────────────────────────────── */
+    .lightbox-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.88);
+      z-index: 9999;
+      cursor: zoom-out;
+      align-items: center;
+      justify-content: center;
+    }
+    .lightbox-overlay.active { display: flex; }
+    .lightbox-overlay img {
+      max-width: 95vw;
+      max-height: 95vh;
+      border: none;
+      border-radius: 0;
+      margin: 0;
+      box-shadow: 0 4px 40px rgba(0,0,0,0.6);
+    }
+
+    /* ── Sticky section nav ────────────────────────────────────────────── */
+    .section-nav {
+      position: sticky;
+      top: 0;
+      background: #fff;
+      border-bottom: 1px solid var(--border);
+      padding: 0.45rem 0;
+      margin: 0.5rem 0 1.2rem;
+      z-index: 100;
+      display: flex;
+      gap: 0.5rem;
+      font-size: 0.82rem;
+    }
+    .section-nav a {
+      color: var(--accent);
+      text-decoration: none;
+      padding: 0.2rem 0.6rem;
+      border-radius: 3px;
+      transition: background 0.15s;
+    }
+    .section-nav a:hover { background: var(--light); }
+  </style>
+</head>
+<body>
+<div class="container">
+
+{# ── Header ───────────────────────────────────────────────────────────────── #}
+<h1>Conformal Correctness Margin — Experiment Report</h1>
+<div class="meta">
+  <span>Generated: <code>{{ generated_at }}</code></span>
+  <span>Experiment: <code>{{ experiment_name }}</code> (id={{ experiment_id }})</span>
+  {% if git_commit %}<span>Git: <code>{{ git_commit }}</code></span>{% endif %}
+  <span>α = {{ "%.2f" | format(alpha) }}</span>
+</div>
+
+{# ── Table of contents ────────────────────────────────────────────────────── #}
+<div class="toc">
+  <h3>Contents</h3>
+  <ul>
+    <li><a href="#summary">Cross-Dataset Summary</a></li>
+    {% for ds in datasets %}
+    <li><a href="#{{ ds.key }}">{{ ds.label }}</a></li>
+    {% endfor %}
+  </ul>
+</div>
+
+{# ── Cross-dataset summary ────────────────────────────────────────────────── #}
+<section id="summary">
+<h2>Cross-Dataset Summary</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Dataset</th>
+      <th>Task</th>
+      <th>Test ROC-AUC</th>
+      <th>Coverage (α={{ "%.2f" | format(alpha) }})</th>
+      <th>Coverage Gap</th>
+      <th>Avg Set Size</th>
+      <th>SC Rate</th>
+      <th>MS Rate</th>
+      <th>Singleton %</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for ds in datasets %}
+    <tr>
+      <td><a href="#{{ ds.key }}">{{ ds.label }}</a></td>
+      <td><span class="badge badge-{{ ds.task | lower }}">{{ ds.task }}</span></td>
+      <td class="metric-highlight">{{ fmt(ds.model.test_roc_auc, ".3f") }}</td>
+      <td>{{ fmt(ds.conformal.test_coverage, ".1%") }}</td>
+      <td>
+        {% set gap = ds.conformal.test_coverage_gap %}
+        {% if gap is not none %}
+          {% if gap >= 0 %}
+            <span class="flag-ok">+{{ fmt(gap, ".1%") }}</span>
+          {% else %}
+            <span class="flag-danger">{{ fmt(gap, ".1%") }}</span>
+          {% endif %}
+        {% else %}—{% endif %}
+      </td>
+      <td>{{ fmt(ds.conformal.test_avg_set_size, ".3f") }}</td>
+      <td>{{ fmt(ds.conformal.test_sc_rate, ".1%") }}</td>
+      <td>{{ fmt(ds.conformal.test_uncertainty_rate, ".1%") }}</td>
+      <td>{{ fmt(ds.conformal.test_singleton_rate, ".1%") }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="interp">
+  SC Rate = Singleton Correct (high confidence, correct prediction).
+  MS Rate = Multi-Set / uncertain rate — the primary FCOD relevance indicator.
+  Singleton % includes both SC and SI outcomes.
+</p>
+</section>
+
+{# ── Per-dataset sections ─────────────────────────────────────────────────── #}
+{% for ds in datasets %}
+<hr class="section-divider">
+<section id="{{ ds.key }}" class="dataset-section">
+<h2>{{ ds.label }} <span class="badge badge-{{ ds.task | lower }}">{{ ds.task }}</span></h2>
+<nav class="section-nav" aria-label="{{ ds.label }} sections">
+  <a href="#{{ ds.key }}-model">↓ Model</a>
+  <a href="#{{ ds.key }}-conformal">↓ Conformal</a>
+  <a href="#{{ ds.key }}-fcod">↓ FCOD</a>
+</nav>
+
+{# ── Model performance ───────────────────────────────────────────────────── #}
+<h3 id="{{ ds.key }}-model">Model Performance</h3>
+{% if ds.model.test_roc_auc is none %}
+<div class="missing-run">No model run found ({{ ds.model_run }}).</div>
+{% else %}
+<table>
+  <thead>
+    <tr>
+      <th>Split</th>
+      <th>ROC-AUC</th>
+      <th>Balanced Acc</th>
+      <th>F1 (macro)</th>
+      <th>Precision (macro)</th>
+      <th>Recall (macro)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Train</td>
+      <td>{{ fmt(ds.model.train_roc_auc, ".3f") }}</td>
+      <td>{{ fmt(ds.model.train_balanced_accuracy, ".3f") }}</td>
+      <td>{{ fmt(ds.model.train_f1_macro, ".3f") }}</td>
+      <td>{{ fmt(ds.model.train_precision_macro, ".3f") }}</td>
+      <td>{{ fmt(ds.model.train_recall_macro, ".3f") }}</td>
+    </tr>
+    <tr>
+      <td>Calibration</td>
+      <td>{{ fmt(ds.model.cal_roc_auc, ".3f") }}</td>
+      <td>{{ fmt(ds.model.cal_balanced_accuracy, ".3f") }}</td>
+      <td>{{ fmt(ds.model.cal_f1_macro, ".3f") }}</td>
+      <td>{{ fmt(ds.model.cal_precision_macro, ".3f") }}</td>
+      <td>{{ fmt(ds.model.cal_recall_macro, ".3f") }}</td>
+    </tr>
+    <tr>
+      <td><strong>Test</strong></td>
+      <td><strong>{{ fmt(ds.model.test_roc_auc, ".3f") }}</strong></td>
+      <td><strong>{{ fmt(ds.model.test_balanced_accuracy, ".3f") }}</strong></td>
+      <td><strong>{{ fmt(ds.model.test_f1_macro, ".3f") }}</strong></td>
+      <td><strong>{{ fmt(ds.model.test_precision_macro, ".3f") }}</strong></td>
+      <td><strong>{{ fmt(ds.model.test_recall_macro, ".3f") }}</strong></td>
+    </tr>
+  </tbody>
+</table>
+{% set delta = ds.model.generalisation_delta %}
+{% if delta is not none %}
+<p class="interp">
+  Generalisation: Δ(train→test) ROC-AUC = {{ fmt(delta, ".3f") }}.
+  {% set delta_abs = delta if delta >= 0 else -delta %}
+  {% if delta_abs > 0.05 %}
+    <span class="flag-warning">⚠ Gap &gt; 0.05 — possible overfitting.</span>
+  {% else %}
+    <span class="flag-ok">Gap within acceptable range.</span>
+  {% endif %}
+</p>
+{% endif %}
+
+{# ── Autolog training artifacts ─────────────────────────────────────────── #}
+{% if ds.model_artifacts %}
+{% set n_m = (1 if ds.model_artifacts.training_confusion_matrix else 0)
+           + (1 if ds.model_artifacts.training_roc_curve else 0)
+           + (1 if ds.model_artifacts.training_precision_recall_curve else 0) %}
+{% if n_m > 1 %}<div class="figure-grid figure-grid-{{ n_m }}">{% endif %}
+  {% if ds.model_artifacts.training_confusion_matrix %}
+  <div class="figure-block">
+    <img src="data:image/png;base64,{{ ds.model_artifacts.training_confusion_matrix }}"
+         alt="Training confusion matrix">
+    <p class="caption">Training confusion matrix (autolog)</p>
+  </div>
+  {% endif %}
+  {% if ds.model_artifacts.training_roc_curve %}
+  <div class="figure-block">
+    <img src="data:image/png;base64,{{ ds.model_artifacts.training_roc_curve }}"
+         alt="Training ROC curve">
+    <p class="caption">Training ROC curve (autolog)</p>
+  </div>
+  {% endif %}
+  {% if ds.model_artifacts.training_precision_recall_curve %}
+  <div class="figure-block">
+    <img src="data:image/png;base64,{{ ds.model_artifacts.training_precision_recall_curve }}"
+         alt="Training precision-recall curve">
+    <p class="caption">Training precision-recall curve (autolog)</p>
+  </div>
+  {% endif %}
+{% if n_m > 1 %}</div>{% endif %}
+{% endif %}
+{% endif %}
+
+{# ── Conformal evaluation ────────────────────────────────────────────────── #}
+<h3 id="{{ ds.key }}-conformal">Conformal Evaluation (α = {{ "%.2f" | format(alpha) }}, Mondrian LAC)</h3>
+{% if ds.conformal.test_coverage is none %}
+<div class="missing-run">No conformal evaluation run found.</div>
+{% else %}
+{% set cov = ds.conformal.test_coverage %}
+{% set gap = ds.conformal.test_coverage_gap %}
+{% set nominal = 1.0 - alpha %}
+<table>
+  <thead>
+    <tr><th>Metric</th><th>Value</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Global Coverage</td>
+      <td class="metric-highlight">
+        {{ fmt(cov, ".1%") }}
+        {% if gap is not none %}
+          (gap:
+          {% if gap >= 0 %}
+            <span class="flag-ok">+{{ fmt(gap, ".1%") }}</span>
+          {% else %}
+            <span class="flag-danger">{{ fmt(gap, ".1%") }}</span>
+          {% endif %}
+          )
+        {% endif %}
+      </td>
+    </tr>
+    {% if ds.conformal.per_class_coverage %}
+    {% for cls_label, cls_cov in ds.conformal.per_class_coverage.items() | sort %}
+    <tr>
+      <td>Coverage — class {{ cls_label }}</td>
+      <td>{{ fmt(cls_cov, ".1%") }}</td>
+    </tr>
+    {% endfor %}
+    {% endif %}
+    <tr><td>SC Rate (Singleton Correct)</td>
+        <td>{{ fmt(ds.conformal.test_sc_rate, ".1%") }}</td></tr>
+    <tr><td>SI Rate (Singleton Incorrect)</td>
+        <td>{{ fmt(ds.conformal.test_si_rate, ".1%") }}</td></tr>
+    {% if ds.conformal.test_si_fp_rate is not none %}
+    <tr><td>&nbsp;&nbsp;↳ SI False Positive Rate</td>
+        <td>{{ fmt(ds.conformal.test_si_fp_rate, ".1%") }}</td></tr>
+    {% endif %}
+    {% if ds.conformal.test_si_fn_rate is not none %}
+    <tr><td>&nbsp;&nbsp;↳ SI False Negative Rate</td>
+        <td>{{ fmt(ds.conformal.test_si_fn_rate, ".1%") }}</td></tr>
+    {% endif %}
+    {% if ds.conformal.test_si_overpred_rate is not none %}
+    <tr><td>&nbsp;&nbsp;↳ SI Over-prediction Rate</td>
+        <td>{{ fmt(ds.conformal.test_si_overpred_rate, ".1%") }}</td></tr>
+    {% endif %}
+    {% if ds.conformal.test_si_underpred_rate is not none %}
+    <tr><td>&nbsp;&nbsp;↳ SI Under-prediction Rate</td>
+        <td>{{ fmt(ds.conformal.test_si_underpred_rate, ".1%") }}</td></tr>
+    {% endif %}
+    <tr><td>MS Rate (Multi-Set / Uncertain)</td>
+        <td>{{ fmt(ds.conformal.test_uncertainty_rate, ".1%") }}</td></tr>
+    <tr><td>Avg Set Size</td>
+        <td>{{ fmt(ds.conformal.test_avg_set_size, ".3f") }}</td></tr>
+    <tr><td>Singleton %</td>
+        <td>{{ fmt(ds.conformal.test_singleton_rate, ".1%") }}</td></tr>
+    <tr><td>Empty %</td>
+        <td>{{ fmt(ds.conformal.test_empty_rate, ".1%") }}</td></tr>
+    <tr><td>Accuracy when Confident (SC)</td>
+        <td>{{ fmt(ds.conformal.test_accuracy_when_confident, ".1%") }}</td></tr>
+  </tbody>
+</table>
+
+{# ── Calibration quantiles (Mondrian LAC thresholds) ────────────────────── #}
+{% if ds.conformal.cal_qhat %}
+<h3>Calibration Quantiles (Mondrian LAC)</h3>
+<table>
+  <thead>
+    <tr><th>Class</th><th>qhat threshold</th></tr>
+  </thead>
+  <tbody>
+    {% for cls_label, qval in ds.conformal.cal_qhat.items() | sort %}
+    <tr>
+      <td>{{ cls_label }}</td>
+      <td>{{ fmt(qval, ".4f") }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="interp">Mondrian LAC nonconformity thresholds per class at α = {{ "%.2f" | format(alpha) }}. Lower values indicate tighter sets for that class.</p>
+{% endif %}
+
+{# Interpretation snippets #}
+{% if gap is not none %}
+{% set gap_abs = gap if gap >= 0 else -gap %}
+<p class="interp">
+  Global coverage {{ fmt(cov, ".1%") }}
+  {{ "exceeds" if gap >= 0 else "falls below" }}
+  the {{ fmt(nominal, ".0%") }} nominal guarantee by {{ fmt(gap_abs, ".1%") }}.
+</p>
+{% endif %}
+
+{% if ds.conformal.per_class_coverage %}
+{% set cls_covs = ds.conformal.per_class_coverage.values() | list %}
+<p class="interp">
+  Mondrian calibration guarantees per-class validity.
+  Per-class coverage range: [{{ fmt(cls_covs | min, ".1%") }}, {{ fmt(cls_covs | max, ".1%") }}].
+</p>
+{% endif %}
+
+{% if ds.conformal.test_sc_rate is not none %}
+<p class="interp">
+  The model is most often Singleton Correct ({{ fmt(ds.conformal.test_sc_rate, ".1%") }}),
+  indicating high predictive confidence.
+  {% if ds.conformal.test_uncertainty_rate is not none and ds.conformal.test_uncertainty_rate > 0.05 %}
+    Multi-set rate of {{ fmt(ds.conformal.test_uncertainty_rate, ".1%") }}
+    indicates substantial uncertainty — FCOD analysis is particularly relevant here.
+  {% endif %}
+</p>
+{% endif %}
+
+{# ── Conformal artifacts — 2×2 grid ─────────────────────────────────────── #}
+{% if ds.conformal_artifacts %}
+<div class="figures">
+  <div class="figure-grid figure-grid-2">
+    {% if ds.conformal_artifacts.coverage_by_alpha %}
+    <div class="figure-block">
+      <img src="data:image/png;base64,{{ ds.conformal_artifacts.coverage_by_alpha }}"
+           alt="Coverage by alpha">
+      <p class="caption">Empirical coverage across alpha values</p>
+    </div>
+    {% endif %}
+    {% if ds.conformal_artifacts.singleton_confusion_matrix %}
+    <div class="figure-block">
+      <img src="data:image/png;base64,{{ ds.conformal_artifacts.singleton_confusion_matrix }}"
+           alt="Singleton confusion matrix">
+      <p class="caption">Singleton prediction outcome breakdown (confusion matrix)</p>
+    </div>
+    {% endif %}
+    {% if ds.conformal_artifacts.prediction_set_size_distribution %}
+    <div class="figure-block">
+      <img src="data:image/png;base64,{{ ds.conformal_artifacts.prediction_set_size_distribution }}"
+           alt="Prediction set size distribution">
+      <p class="caption">Distribution of prediction set sizes</p>
+    </div>
+    {% endif %}
+    {% if ds.conformal_artifacts.set_size_vs_true_label %}
+    <div class="figure-block">
+      <img src="data:image/png;base64,{{ ds.conformal_artifacts.set_size_vs_true_label }}"
+           alt="Set size vs true label">
+      <p class="caption">Prediction set size vs true class label</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+{% endif %}{# end if conformal coverage #}
+
+{# ── FCOD analysis ───────────────────────────────────────────────────────── #}
+<h3 id="{{ ds.key }}-fcod">FCOD Analysis</h3>
+{% if not ds.artifacts %}
+<div class="missing-run">No FCOD run or artifacts found.</div>
+{% else %}
+<div class="figures">
+
+  {# fcod_with_ci — primary FCOD line plot (full-width) #}
+  {% if 'fcod_with_ci' in ds.artifacts %}
+    {% if ds.artifacts['fcod_with_ci'] %}
+    <div class="figure-block">
+      <img src="data:image/png;base64,{{ ds.artifacts['fcod_with_ci'] }}"
+           alt="FCOD by feature with 95% bootstrap CI">
+      <p class="caption">Outcome FCODs by feature (with 95% bootstrap CI)</p>
+    </div>
+    {% else %}
+    <div class="figure-missing">fcod_with_ci.png — not available</div>
+    {% endif %}
+  {% endif %}
+
+  {# fcod_stacked — stacked area (full-width) #}
+  {% if 'fcod_stacked' in ds.artifacts %}
+    {% if ds.artifacts['fcod_stacked'] %}
+    <div class="figure-block">
+      <img src="data:image/png;base64,{{ ds.artifacts['fcod_stacked'] }}"
+           alt="Stacked outcome distribution by feature">
+      <p class="caption">Stacked outcome distribution by feature</p>
+    </div>
+    {% else %}
+    <div class="figure-missing">fcod_stacked.png — not available</div>
+    {% endif %}
+  {% endif %}
+
+  {# outcome_by_category + fcod_sc_si_grid / fcod_sc_mc_grid — 2-col grid #}
+  {% set secondary_keys = ['outcome_by_category', 'fcod_sc_si_grid', 'fcod_sc_mc_grid'] %}
+  {% set secondary_items = [] %}
+  {% for k in secondary_keys %}
+    {% if k in ds.artifacts and ds.artifacts[k] %}
+      {% set _ = secondary_items.append((k, ds.artifacts[k])) %}
+    {% endif %}
+  {% endfor %}
+  {% if secondary_items | length > 0 %}
+  <div class="figure-grid figure-grid-2">
+    {% for art_key, b64 in secondary_items %}
+    <div class="figure-block">
+      <img src="data:image/png;base64,{{ b64 }}"
+           alt="{{ art_key.replace('_', ' ').title() }}">
+      <p class="caption">{{ art_key.replace('_', ' ').title() }}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# Any remaining PNG artifacts (e.g. uncertainty_zones_*) — 2-col grid #}
+  {% set shown = ['fcod_with_ci', 'fcod_stacked', 'outcome_by_category', 'fcod_sc_si_grid', 'fcod_sc_mc_grid'] %}
+  {% set extras = [] %}
+  {% for art_key, b64 in ds.artifacts.items() %}
+    {% if art_key not in shown and b64 %}
+      {% set _ = extras.append((art_key, b64)) %}
+    {% endif %}
+  {% endfor %}
+  {% if extras | length > 1 %}
+  <div class="figure-grid figure-grid-2">
+    {% for art_key, b64 in extras %}
+    <div class="figure-block">
+      <img src="data:image/png;base64,{{ b64 }}" alt="{{ art_key }}">
+      <p class="caption">{{ art_key.replace('_', ' ').title() }}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% elif extras | length == 1 %}
+  <div class="figure-block">
+    <img src="data:image/png;base64,{{ extras[0][1] }}" alt="{{ extras[0][0] }}">
+    <p class="caption">{{ extras[0][0].replace('_', ' ').title() }}</p>
+  </div>
+  {% endif %}
+
+</div>{# /figures #}
+{% endif %}{# end if artifacts #}
+
+</section>
+{% endfor %}{# end for datasets #}
+
+</div>{# /container #}
+
+<div class="lightbox-overlay" id="lightbox">
+  <img id="lightbox-img" src="" alt="">
+</div>
+<script>
+  (function () {
+    var overlay = document.getElementById('lightbox');
+    var lbImg   = document.getElementById('lightbox-img');
+    document.querySelectorAll('.figure-block img').forEach(function (img) {
+      img.style.cursor = 'zoom-in';
+      img.addEventListener('click', function () {
+        lbImg.src = img.src;
+        lbImg.alt = img.alt;
+        overlay.classList.add('active');
+      });
+    });
+    overlay.addEventListener('click', function () {
+      overlay.classList.remove('active');
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') overlay.classList.remove('active');
+    });
+  })();
+</script>
+</body>
+</html>
