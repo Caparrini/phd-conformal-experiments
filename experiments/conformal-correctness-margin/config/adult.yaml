@@ -1,0 +1,33 @@
+data:
+  source: "adult"
+  file: "data/cleaned/adult.parquet"
+  target: "income"
+  task: "binary"
+  features:
+    numerical: [age, education-num, capital-gain, capital-loss, hours-per-week]
+    categorical: [workclass, marital-status, occupation, relationship, race, sex, native-country]
+  splits:
+    train_size: 0.6
+    calibration_size: 0.2
+    seed: 42
+
+model:
+  name: "XGBoost"
+  params:
+    n_estimators: 200
+    max_depth: 6
+    learning_rate: 0.1
+    subsample: 0.8
+    colsample_bytree: 0.8
+    random_state: 42
+    objective: "binary:logistic"
+    eval_metric: "logloss"
+
+conformal:
+  alpha: 0.10
+  method: "lac"
+
+experiment:
+  name: "conformal-correctness-margin"
+  seed: 42
+  run_name: "adult-xgboost"
