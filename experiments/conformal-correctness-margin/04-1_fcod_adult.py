@@ -111,8 +111,8 @@ def _(
     fcod_features = {
         "age":            {"label": "Age",               "clip": None},
         "education-num":  {"label": "Education (years)",  "clip": None},
-        "capital-gain":   {"label": "Capital Gain ($)",   "clip": (0, float(X_test["capital-gain"].quantile(0.99)))},
-        "capital-loss":   {"label": "Capital Loss ($)",   "clip": (0, float(X_test["capital-loss"].quantile(0.99)))},
+        "capital-gain":   {"label": "Capital Gain ($)",   "clip": (1, float(X_test["capital-gain"].quantile(0.99)))},
+        "capital-loss":   {"label": "Capital Loss ($)",   "clip": (1, float(X_test["capital-loss"].quantile(0.99)))},
         "hours-per-week": {"label": "Hours per Week",     "clip": None},
     }
     N_COLS = 3

@@ -25,7 +25,7 @@ def _(mo):
     |---------|------|--------|
     | **Adult** | Binary classification | Kohavi & Becker (1996), UCI ML Repository |
     | **Credit Card Default** | Binary classification | Yeh & Lien (2009), UCI ML Repository |
-    | **Dry Bean** | Multiclass classification | Koklu & Ozkan (2020), UCI ML Repository |
+    | **Wine Quality** | Multiclass classification | Cortez et al. (2009), UCI ML Repository |
     """)
     return
 
@@ -195,52 +195,77 @@ def _(CLEANED_DIR, df_credit):
 @app.cell
 def _(mo):
     mo.md("""
-    ## Dry Bean Dataset
+    ## Wine Quality Dataset
     """)
     return
 
 
 @app.cell
 def _():
-    from ucimlrepo import fetch_ucirepo
+    from sklearn.datasets import fetch_openml as _fetch_wine
 
-    beans_raw = fetch_ucirepo(id=602)
-    beans_raw.data.features.shape
-    return (beans_raw,)
+    # OpenML 40691 = winequality-red (1599 rows, correct column names)
+    # OpenML 40498 = winequality-white (4898 rows, generic V1-V11 column names)
+    wine_red_raw = _fetch_wine(data_id=40691, as_frame=True, parser="auto")
+    wine_white_raw = _fetch_wine(data_id=40498, as_frame=True, parser="auto")
+    (wine_red_raw.data.shape, wine_white_raw.data.shape)
+    return wine_red_raw, wine_white_raw
 
 
 @app.cell
-def _(beans_raw, pl):
-    df_beans = pl.from_pandas(beans_raw.data.features)
+def _(pl, wine_red_raw, wine_white_raw):
+    import pandas as pd
 
-    # Lowercase column names and add target as bean_type
-    df_beans = df_beans.rename({c: c.lower() for c in df_beans.columns})
-    df_beans = df_beans.with_columns(
-        pl.Series("bean_type", beans_raw.data.targets.iloc[:, 0])
+    # Wine feature names in UCI order (shared by red and white)
+    _WINE_COLS = [
+        "fixed_acidity", "volatile_acidity", "citric_acid", "residual_sugar",
+        "chlorides", "free_sulfur_dioxide", "total_sulfur_dioxide", "density",
+        "ph", "sulphates", "alcohol",
+    ]
+
+    def _clean(df):
+        return {c: c.strip().lower().replace(" ", "_") for c in df.columns}
+
+    red = wine_red_raw.data.copy().rename(columns=_clean(wine_red_raw.data))
+    red["wine_type"] = "red"
+    red["quality"] = wine_red_raw.target.astype(int)
+
+    # White wine has generic V1-V11 column names → rename to match red
+    # OpenML 40498 encodes quality as 1-7 (shifted: actual UCI quality = openml + 2)
+    _white_rename = {f"V{i+1}": name for i, name in enumerate(_WINE_COLS)}
+    white = wine_white_raw.data.copy().rename(columns=_white_rename)
+    white["wine_type"] = "white"
+    white["quality"] = wine_white_raw.target.astype(int) + 2
+
+    combined = pd.concat([red, white], ignore_index=True)
+    combined["quality_class"] = combined["quality"].map(
+        lambda q: "low" if q <= 5 else ("high" if q >= 7 else "medium")
     )
+    combined = combined.drop(columns=["quality"])
 
-    df_beans.shape
-    return (df_beans,)
+    df_wine = pl.from_pandas(combined)
+    df_wine.shape
+    return (df_wine,)
 
 
 @app.cell
-def _(df_beans):
-    df_beans.head()
+def _(df_wine):
+    df_wine.head()
     return
 
 
 @app.cell
-def _(df_beans):
-    df_beans.describe()
+def _(df_wine):
+    df_wine.describe()
     return
 
 
 @app.cell
-def _(CLEANED_DIR, df_beans):
-    beans_path = CLEANED_DIR / "dry_beans.parquet"
-    df_beans.write_parquet(beans_path)
-    beans_path
-    return (beans_path,)
+def _(CLEANED_DIR, df_wine):
+    wine_path = CLEANED_DIR / "wine_quality.parquet"
+    df_wine.write_parquet(wine_path)
+    wine_path
+    return (wine_path,)
 
 
 @app.cell
@@ -252,7 +277,7 @@ def _(mo):
 
 
 @app.cell
-def _(adult_path, beans_path, credit_path, df_adult, df_beans, df_credit, mo):
+def _(adult_path, credit_path, wine_path, df_adult, df_credit, df_wine, mo):
     def _size_mb(path):
         return path.stat().st_size / 1024 / 1024
 
@@ -261,7 +286,7 @@ def _(adult_path, beans_path, credit_path, df_adult, df_beans, df_credit, mo):
     |---------|------|----------|--------|------|------|
     | Adult | {df_adult.shape[0]:,} | {df_adult.shape[1] - 1} | `income` | Binary | {_size_mb(adult_path):.1f} MB |
     | Credit Card Default | {df_credit.shape[0]:,} | {df_credit.shape[1] - 1} | `default` | Binary | {_size_mb(credit_path):.1f} MB |
-    | Dry Bean | {df_beans.shape[0]:,} | {df_beans.shape[1] - 1} | `bean_type` | Multiclass (7) | {_size_mb(beans_path):.1f} MB |
+    | Wine Quality | {df_wine.shape[0]:,} | {df_wine.shape[1] - 1} | `quality_class` | Multiclass (3) | {_size_mb(wine_path):.1f} MB |
     """
     mo.md(summary)
     return

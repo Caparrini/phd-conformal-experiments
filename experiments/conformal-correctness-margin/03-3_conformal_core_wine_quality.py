@@ -15,7 +15,7 @@ def _():
     CONFIG_DIR = str(EXPERIMENT_DIR / "config")
 
     with initialize_config_dir(config_dir=CONFIG_DIR, version_base=None):
-        cfg = compose(config_name="dry_beans")
+        cfg = compose(config_name="wine_quality")
 
     return EXPERIMENT_DIR, OmegaConf, cfg, mo
 
@@ -58,13 +58,13 @@ def _(cfg, mo):
     experiment = mlflow.get_experiment_by_name(cfg.experiment.name)
     runs = mlflow.search_runs(
         experiment_ids=[experiment.experiment_id],
-        filter_string=f"tags.mlflow.runName = '{cfg.experiment.run_name}'",
+        filter_string="tags.mlflow.runName = 'wine-xgboost'",
         order_by=["start_time DESC"],
         max_results=1,
     )
     run_id = runs.iloc[0].run_id
     pipeline = mlflow.sklearn.load_model(f"runs:/{run_id}/model")
-    mo.md(f"Loaded model from run `{run_id}` ({cfg.experiment.run_name})")
+    mo.md(f"Loaded model from run `{run_id}` (wine-xgboost)")
     return mlflow, pipeline
 
 
@@ -103,7 +103,7 @@ def _(
 
     with tracked_run(
         config_dict, data_path, cfg.experiment.name,
-        run_name="dry-beans-conformal-evaluation",
+        run_name="wine-conformal-evaluation",
     ):
         conf_clf = ConformalClassifier(
             model=pipeline,
@@ -116,7 +116,7 @@ def _(
         conf_clf.score(X_test, y_test)
         prediction_sets = conf_clf.predict(X_test)
 
-        # 1. Singleton confusion matrix (N×N multiclass)
+        # 1. Singleton confusion matrix (3×3 multiclass)
         singleton_mask = [len(s) == 1 for s in prediction_sets]
         y_true_sing = np.asarray(y_test)[singleton_mask]
         y_pred_sing = np.array([next(iter(s)) for s, m in zip(prediction_sets, singleton_mask) if m])
@@ -124,7 +124,7 @@ def _(
         labels = list(class_names.keys())
         label_names = [class_names[k] for k in labels]
         cm = sk_confusion_matrix(y_true_sing, y_pred_sing, labels=labels)
-        fig, ax = plt.subplots(figsize=(9, 7))
+        fig, ax = plt.subplots(figsize=(7, 6))
         sns.heatmap(
             cm,
             annot=True,

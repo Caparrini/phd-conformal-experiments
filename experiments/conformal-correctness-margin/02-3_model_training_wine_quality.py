@@ -21,7 +21,7 @@ def _(Path):
     CONFIG_DIR = str(EXPERIMENT_DIR / "config")
 
     with initialize_config_dir(config_dir=CONFIG_DIR, version_base=None):
-        cfg = compose(config_name="dry_beans")
+        cfg = compose(config_name="wine_quality")
 
     OmegaConf.to_yaml(cfg)
     return EXPERIMENT_DIR, OmegaConf, cfg
@@ -138,7 +138,7 @@ def _(
     mlflow.sklearn.autolog()
     config_dict = OmegaConf.to_container(cfg, resolve=True)
 
-    with tracked_run(config_dict, data_path, cfg.experiment.name, run_name="dry-beans-xgboost"):
+    with tracked_run(config_dict, data_path, cfg.experiment.name, run_name="wine-xgboost"):
         pipeline.fit(X_train, y_train)
 
         train_metrics = _metrics(
