@@ -359,6 +359,21 @@ def _(
             mlflow.log_figure(fig_ci, "fcod_with_ci.png")
             plt.close(fig_ci)
 
+            # Per-feature FCOD with histogram density panel
+            for _feature_name, _fcod in fcod_results_ci.items():
+                _main_ax, _density_ax = plot_fcod(
+                    _fcod,
+                    outcomes=OUTCOMES,
+                    show_ci=True,
+                    show_density=True,
+                    density_type="histogram",
+                    feature_values=X_test[_feature_name].values,
+                    xlabel=_fcod["feature_name"],
+                    title=_fcod["feature_name"],
+                )
+                mlflow.log_figure(_main_ax.figure, f"fcod_histogram/{_feature_name}.png")
+                plt.close(_main_ax.figure)
+
             # Stacked area plots
             fig_stacked, axes = plt.subplots(_n_rows, N_COLS, figsize=(N_COLS * 5, _n_rows * 4))
             for i in range(_n_feat, _n_rows * N_COLS):
