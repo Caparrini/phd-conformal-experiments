@@ -53,7 +53,13 @@ def _(EXPERIMENT_DIR, cfg, mo):
     X_cal, y_cal = splits["calibration"]
     X_test, y_test = splits["test"]
 
-    mo.md(f"Calibration: {len(X_cal):,} | Test: {len(X_test):,}")
+    # Encode class labels as zero-indexed integers (quality_class is stored as strings)
+    _all_classes = sorted(set(y_cal.unique()) | set(y_test.unique()))
+    _class_to_idx = {c: i for i, c in enumerate(_all_classes)}
+    y_cal = y_cal.map(_class_to_idx)
+    y_test = y_test.map(_class_to_idx)
+
+    mo.md(f"Calibration: {len(X_cal):,} | Test: {len(X_test):,} | Classes: {_all_classes}")
     return X_cal, X_test, data_path, y_cal, y_test
 
 
