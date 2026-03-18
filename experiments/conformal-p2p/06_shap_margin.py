@@ -307,33 +307,23 @@ def _(
         shap_credibility, X_explain_df, "SHAP Beeswarm — Credibility (all)"
     )
 
-    # Confidence by class (2-panel figure)
-    _fig_conf_by_class, _axes = plt.subplots(1, 2, figsize=(14, 5))
+    # Confidence by class — one figure per class
     for _k, _label in [(0, "approved"), (1, "default")]:
         _mask = y_explain == _k
-        plt.sca(_axes[_k])
-        shap.summary_plot(
+        figs_beeswarm_derived[f"confidence_class{_k}"] = _beeswarm_d(
             shap_confidence[_mask],
             X_explain_df[_mask].reset_index(drop=True),
-            feature_names=all_cols, plot_type="dot", show=False,
+            f"Confidence SHAP | true={_label}",
         )
-        _axes[_k].set_title(f"Confidence SHAP | true={_label}")
-    plt.tight_layout()
-    figs_beeswarm_derived["confidence_by_class"] = _fig_conf_by_class
 
-    # Credibility by class (2-panel figure)
-    _fig_cred_by_class, _axes2 = plt.subplots(1, 2, figsize=(14, 5))
+    # Credibility by class — one figure per class
     for _k, _label in [(0, "approved"), (1, "default")]:
         _mask = y_explain == _k
-        plt.sca(_axes2[_k])
-        shap.summary_plot(
+        figs_beeswarm_derived[f"credibility_class{_k}"] = _beeswarm_d(
             shap_credibility[_mask],
             X_explain_df[_mask].reset_index(drop=True),
-            feature_names=all_cols, plot_type="dot", show=False,
+            f"Credibility SHAP | true={_label}",
         )
-        _axes2[_k].set_title(f"Credibility SHAP | true={_label}")
-    plt.tight_layout()
-    figs_beeswarm_derived["credibility_by_class"] = _fig_cred_by_class
 
     mo.md(f"Beeswarm derived metrics: {len(figs_beeswarm_derived)} figures generated.")
     return figs_beeswarm_derived,
