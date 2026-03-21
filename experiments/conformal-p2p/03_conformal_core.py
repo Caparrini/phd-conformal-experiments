@@ -115,7 +115,7 @@ def _(
             y_test,
             class_names={0: "approve", 1: "reject"},
         )
-        mlflow.log_figure(fig, "singleton_confusion_matrix.png")
+        mlflow.log_figure(fig, "singleton_confusion_matrix.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig)
         import matplotlib.pyplot as plt
         from conformalpy.plots import (
@@ -129,13 +129,13 @@ def _(
             prediction_sets, y_test,
             class_names={0: "approve", 1: "reject"},
         )
-        mlflow.log_figure(fig, "singleton_confusion_matrix.png")
+        mlflow.log_figure(fig, "singleton_confusion_matrix.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig)
 
         # 2. Set size distribution
         fig, _ = plot_prediction_set_size_distribution(prediction_sets)
         type(fig)
-        mlflow.log_figure(fig, "prediction_set_size_distribution.png")
+        mlflow.log_figure(fig, "prediction_set_size_distribution.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig)
 
         # 3. Nonconformity scores
@@ -146,12 +146,12 @@ def _(
         #     y_test, scores_test,
         #     conf_clf.qhat_,
         # )
-        # mlflow.log_figure(fig, "nonconformity_scores.png")
+        # mlflow.log_figure(fig, "nonconformity_scores.png", save_kwargs={"bbox_inches": "tight"})
         # plt.close(fig)
 
         # 4. Set size vs true label
         fig, _ = plot_set_size_vs_true_label(prediction_sets, y_test)
-        mlflow.log_figure(fig, "set_size_vs_true_label.png")
+        mlflow.log_figure(fig, "set_size_vs_true_label.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig)
 
         import numpy as np
@@ -174,7 +174,7 @@ def _(
             avg_sizes.append(float(np.mean(sets_a.sum(axis=1))))
 
         fig_cov_by_alpha, _ = plot_coverage_by_alpha(alphas, coverages, widths=avg_sizes)
-        mlflow.log_figure(fig_cov_by_alpha, "coverage_by_alpha.png")
+        mlflow.log_figure(fig_cov_by_alpha, "coverage_by_alpha.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig_cov_by_alpha)
 
         import tempfile

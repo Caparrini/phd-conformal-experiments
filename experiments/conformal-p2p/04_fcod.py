@@ -469,7 +469,7 @@ def _(
                           xlabel=fcod["feature_name"], title=fcod["feature_name"])
             fig_ci.suptitle(f"Outcome FCODs by Feature (α={alpha})", fontsize=14, y=1.02)
             fig_ci.tight_layout()
-            mlflow.log_figure(fig_ci, "fcod_with_ci.png")
+            mlflow.log_figure(fig_ci, "fcod_with_ci.png", save_kwargs={"bbox_inches": "tight"})
             plt.close(fig_ci)
 
             # Per-feature FCOD with histogram density panel
@@ -483,7 +483,7 @@ def _(
                     xlabel=_fcod["feature_name"],
                     title=_fcod["feature_name"],
                 )
-                mlflow.log_figure(_main_ax.figure, f"fcod_histogram/{_feature_name}.png")
+                mlflow.log_figure(_main_ax.figure, f"fcod_histogram/{_feature_name}.png", save_kwargs={"bbox_inches": "tight"})
                 plt.close(_main_ax.figure)
 
             # Stacked area plots
@@ -493,7 +493,7 @@ def _(
                                   xlabel=fcod["feature_name"], title=fcod["feature_name"])
             fig_stacked.suptitle(f"Outcome Distribution by Feature (α={alpha})", fontsize=14, y=1.02)
             fig_stacked.tight_layout()
-            mlflow.log_figure(fig_stacked, "fcod_stacked.png")
+            mlflow.log_figure(fig_stacked, "fcod_stacked.png", save_kwargs={"bbox_inches": "tight"})
             plt.close(fig_stacked)
 
             # SC + SI multi-feature grid
@@ -503,7 +503,7 @@ def _(
             )
             fig_sc_si.suptitle(f"SC and SI Rates (α={alpha})", fontsize=14, y=1.02)
             fig_sc_si.tight_layout()
-            mlflow.log_figure(fig_sc_si, "fcod_sc_si_grid.png")
+            mlflow.log_figure(fig_sc_si, "fcod_sc_si_grid.png", save_kwargs={"bbox_inches": "tight"})
             plt.close(fig_sc_si)
 
             # Uncertainty zones FICO
@@ -511,7 +511,7 @@ def _(
             plot_uncertainty_zones(fcod_results_ci["fico_n"], ax=ax,
                                    safe_threshold=0.7, uncertain_threshold=0.3,
                                    title=f"Decision Zones: FICO Score (α={alpha})")
-            mlflow.log_figure(fig_zones, "uncertainty_zones_fico.png")
+            mlflow.log_figure(fig_zones, "uncertainty_zones_fico.png", save_kwargs={"bbox_inches": "tight"})
             plt.close(fig_zones)
 
             # Categorical outcome distributions
@@ -530,7 +530,7 @@ def _(
                 )
             fig_cat.suptitle(f"Outcome Distribution by Categorical Features (α={alpha})", fontsize=14, y=1.02)
             fig_cat.tight_layout()
-            mlflow.log_figure(fig_cat, "outcome_by_category.png")
+            mlflow.log_figure(fig_cat, "outcome_by_category.png", save_kwargs={"bbox_inches": "tight"})
             plt.close(fig_cat)
 
             # === Per-class plots ===
@@ -552,7 +552,7 @@ def _(
                               xlabel=fcod["feature_name"], title=fcod["feature_name"])
                 _fig_ci.suptitle(f"Outcome FCODs — Class {_cls} (α={alpha})", fontsize=14, y=1.02)
                 _fig_ci.tight_layout()
-                mlflow.log_figure(_fig_ci, f"{_prefix}/fcod_with_ci.png")
+                mlflow.log_figure(_fig_ci, f"{_prefix}/fcod_with_ci.png", save_kwargs={"bbox_inches": "tight"})
                 plt.close(_fig_ci)
 
                 # Per-feature histogram
@@ -566,7 +566,7 @@ def _(
                         xlabel=_fcod["feature_name"],
                         title=_fcod["feature_name"],
                     )
-                    mlflow.log_figure(_main_ax.figure, f"{_prefix}/fcod_histogram/{_feat}.png")
+                    mlflow.log_figure(_main_ax.figure, f"{_prefix}/fcod_histogram/{_feat}.png", save_kwargs={"bbox_inches": "tight"})
                     plt.close(_main_ax.figure)
 
                 # Stacked
@@ -576,7 +576,7 @@ def _(
                                       xlabel=fcod["feature_name"], title=fcod["feature_name"])
                 _fig_stacked.suptitle(f"Outcome Distribution — Class {_cls} (α={alpha})", fontsize=14, y=1.02)
                 _fig_stacked.tight_layout()
-                mlflow.log_figure(_fig_stacked, f"{_prefix}/fcod_stacked.png")
+                mlflow.log_figure(_fig_stacked, f"{_prefix}/fcod_stacked.png", save_kwargs={"bbox_inches": "tight"})
                 plt.close(_fig_stacked)
 
                 # SC/SI grid
@@ -586,7 +586,7 @@ def _(
                 )
                 _fig_sc_si.suptitle(f"SC and SI Rates — Class {_cls} (α={alpha})", fontsize=14, y=1.02)
                 _fig_sc_si.tight_layout()
-                mlflow.log_figure(_fig_sc_si, f"{_prefix}/fcod_sc_si_grid.png")
+                mlflow.log_figure(_fig_sc_si, f"{_prefix}/fcod_sc_si_grid.png", save_kwargs={"bbox_inches": "tight"})
                 plt.close(_fig_sc_si)
 
                 # Uncertainty zones: FICO score
@@ -596,7 +596,7 @@ def _(
                     safe_threshold=0.7, uncertain_threshold=0.3,
                     title=f"Decision Zones: FICO Score — Class {_cls} (α={alpha})",
                 )
-                mlflow.log_figure(_fig_zones, f"{_prefix}/uncertainty_zones_fico.png")
+                mlflow.log_figure(_fig_zones, f"{_prefix}/uncertainty_zones_fico.png", save_kwargs={"bbox_inches": "tight"})
                 plt.close(_fig_zones)
 
                 # Categorical outcome distributions
@@ -615,7 +615,7 @@ def _(
                     )
                 _fig_cat.suptitle(f"Outcome Distribution by Categorical Features — Class {_cls} (α={alpha})", fontsize=14, y=1.02)
                 _fig_cat.tight_layout()
-                mlflow.log_figure(_fig_cat, f"{_prefix}/outcome_by_category.png")
+                mlflow.log_figure(_fig_cat, f"{_prefix}/outcome_by_category.png", save_kwargs={"bbox_inches": "tight"})
                 plt.close(_fig_cat)
 
         return mo.md("FCOD plots logged to MLflow")

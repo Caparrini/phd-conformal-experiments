@@ -138,17 +138,17 @@ def _(
         ax.set_ylabel("True class")
         ax.set_title(f"Singleton Confusion Matrix — {n_sing}/{len(prediction_sets)} singletons")
         plt.tight_layout()
-        mlflow.log_figure(fig, "singleton_confusion_matrix.png")
+        mlflow.log_figure(fig, "singleton_confusion_matrix.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig)
 
         # 2. Set size distribution
         fig, _ = plot_prediction_set_size_distribution(prediction_sets)
-        mlflow.log_figure(fig, "prediction_set_size_distribution.png")
+        mlflow.log_figure(fig, "prediction_set_size_distribution.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig)
 
         # 3. Set size vs true label
         fig, _ = plot_set_size_vs_true_label(prediction_sets, y_test)
-        mlflow.log_figure(fig, "set_size_vs_true_label.png")
+        mlflow.log_figure(fig, "set_size_vs_true_label.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig)
 
         # 4. Coverage by alpha (range 0.01..0.50)
@@ -164,7 +164,7 @@ def _(
             for i in range(len(alphas))
         ]
         fig, _ = plot_coverage_by_alpha(alphas, coverages, widths=avg_sizes)
-        mlflow.log_figure(fig, "coverage_by_alpha.png")
+        mlflow.log_figure(fig, "coverage_by_alpha.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig)
 
         # 5. Prediction sets artifact

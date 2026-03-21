@@ -627,34 +627,34 @@ def _(
 
         # Beeswarm — p-values
         for _name, _fig in figs_beeswarm_pv.items():
-            mlflow.log_figure(_fig, f"shap/beeswarm/pvalues/{_name}.png")
+            mlflow.log_figure(_fig, f"shap/beeswarm/pvalues/{_name}.png", save_kwargs={"bbox_inches": "tight"})
             plt.close(_fig)
 
         # Beeswarm — derived metrics
         for _name, _fig in figs_beeswarm_derived.items():
-            mlflow.log_figure(_fig, f"shap/beeswarm/derived/{_name}.png")
+            mlflow.log_figure(_fig, f"shap/beeswarm/derived/{_name}.png", save_kwargs={"bbox_inches": "tight"})
             plt.close(_fig)
 
         # Dependence — numeric features
-        mlflow.log_figure(fig_dep_margin_num, "shap/dependence/numeric/margin.png")
+        mlflow.log_figure(fig_dep_margin_num, "shap/dependence/numeric/margin.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig_dep_margin_num)
-        mlflow.log_figure(fig_dep_pv_num, "shap/dependence/numeric/pvalues.png")
+        mlflow.log_figure(fig_dep_pv_num, "shap/dependence/numeric/pvalues.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig_dep_pv_num)
-        mlflow.log_figure(fig_dep_cc_num, "shap/dependence/numeric/confidence_credibility.png")
+        mlflow.log_figure(fig_dep_cc_num, "shap/dependence/numeric/confidence_credibility.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig_dep_cc_num)
 
         # Dependence — categorical features
-        mlflow.log_figure(fig_dep_margin_cat, "shap/dependence/categorical/margin.png")
+        mlflow.log_figure(fig_dep_margin_cat, "shap/dependence/categorical/margin.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig_dep_margin_cat)
-        mlflow.log_figure(fig_dep_pv_cat, "shap/dependence/categorical/pvalues.png")
+        mlflow.log_figure(fig_dep_pv_cat, "shap/dependence/categorical/pvalues.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig_dep_pv_cat)
-        mlflow.log_figure(fig_dep_cc_cat, "shap/dependence/categorical/confidence_credibility.png")
+        mlflow.log_figure(fig_dep_cc_cat, "shap/dependence/categorical/confidence_credibility.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig_dep_cc_cat)
 
         # Importance & heatmap
-        mlflow.log_figure(fig_importance, "shap/importance/margin_importance.png")
+        mlflow.log_figure(fig_importance, "shap/importance/margin_importance.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig_importance)
-        mlflow.log_figure(fig_heatmap, "shap/importance/heatmap.png")
+        mlflow.log_figure(fig_heatmap, "shap/importance/heatmap.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig_heatmap)
 
     mo.md("""

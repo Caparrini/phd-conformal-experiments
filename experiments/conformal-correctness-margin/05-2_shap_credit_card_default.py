@@ -380,21 +380,21 @@ def _(
         })
 
         for _name, _fig in figs_beeswarm_pv.items():
-            mlflow.log_figure(_fig, f"shap/beeswarm/pvalues/{_name}.png")
+            mlflow.log_figure(_fig, f"shap/beeswarm/pvalues/{_name}.png", save_kwargs={"bbox_inches": "tight"})
             plt.close(_fig)
 
         for _name, _fig in figs_beeswarm_derived.items():
-            mlflow.log_figure(_fig, f"shap/beeswarm/derived/{_name}.png")
+            mlflow.log_figure(_fig, f"shap/beeswarm/derived/{_name}.png", save_kwargs={"bbox_inches": "tight"})
             plt.close(_fig)
 
-        mlflow.log_figure(fig_dep_margin_num, "shap/dependence/numeric/margin.png")
+        mlflow.log_figure(fig_dep_margin_num, "shap/dependence/numeric/margin.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig_dep_margin_num)
-        mlflow.log_figure(fig_dep_margin_cat, "shap/dependence/categorical/margin.png")
+        mlflow.log_figure(fig_dep_margin_cat, "shap/dependence/categorical/margin.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig_dep_margin_cat)
 
-        mlflow.log_figure(fig_importance, "shap/importance/margin_importance.png")
+        mlflow.log_figure(fig_importance, "shap/importance/margin_importance.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig_importance)
-        mlflow.log_figure(fig_heatmap, "shap/importance/heatmap.png")
+        mlflow.log_figure(fig_heatmap, "shap/importance/heatmap.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig_heatmap)
 
     mo.md("""
