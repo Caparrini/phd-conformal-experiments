@@ -35,6 +35,7 @@ DATASETS: list[dict[str, str]] = [
         "model_run": "adult-xgboost",
         "conformal_run": "adult-conformal-evaluation",
         "fcod_run": "adult-fcod-analysis",
+        "shap_run": "adult-shap-analysis",
     },
     {
         "key": "credit_card_default",
@@ -43,6 +44,7 @@ DATASETS: list[dict[str, str]] = [
         "model_run": "credit-card-xgboost",
         "conformal_run": "credit-card-conformal-evaluation",
         "fcod_run": "credit-card-fcod-analysis",
+        "shap_run": "credit-card-shap-analysis",
     },
     {
         "key": "wine_quality",
@@ -51,8 +53,20 @@ DATASETS: list[dict[str, str]] = [
         "model_run": "wine-xgboost",
         "conformal_run": "wine-conformal-evaluation",
         "fcod_run": "wine-fcod-analysis",
+        "shap_run": "wine-shap-analysis",
     },
 ]
+
+# SHAP artifact paths to display (curated subset)
+SHAP_DISPLAY_ARTIFACTS: dict[str, str] = {
+    "margin_beeswarm_all":            "shap/beeswarm/derived/margin_all.png",
+    "confidence_beeswarm_all":        "shap/beeswarm/derived/confidence_all.png",
+    "credibility_beeswarm_all":       "shap/beeswarm/derived/credibility_all.png",
+    "dependence_numeric_margin":      "shap/dependence/numeric/margin.png",
+    "dependence_categorical_margin":  "shap/dependence/categorical/margin.png",
+    "importance_margin":              "shap/importance/margin_importance.png",
+    "importance_heatmap":             "shap/importance/heatmap.png",
+}
 
 # Primary artifact filenames expected in FCOD runs (order = display order)
 FCOD_ARTIFACT_NAMES: list[str] = [
@@ -358,11 +372,43 @@ def build_dataset_block(
         # Collect any additional PNG artifacts not already fetched
         all_paths = list_artifacts_flat(client, run_id)
         for path in all_paths:
+            if path.startswith("by_class/"):
+                continue  # handled separately below
             filename = Path(path).name
             if filename.endswith(".png"):
                 artifact_key = filename.replace(".png", "")
                 if artifact_key not in artifacts:
                     artifacts[artifact_key] = download_artifact_b64(run_id, path)
+
+        # Collect per-class artifacts from by_class/ subdirs
+        artifacts_by_class: dict[str, dict[str, str | None]] = {}
+        class_dirs = sorted({
+            "/".join(p.split("/")[:2])
+            for p in all_paths
+            if p.startswith("by_class/")
+        })
+        for class_dir in class_dirs:
+            class_label = class_dir.split("/")[1]  # e.g. "class_0"
+            class_arts: dict[str, str | None] = {}
+            class_paths = [p for p in all_paths if p.startswith(class_dir + "/")]
+            for path in class_paths:
+                filename = Path(path).name
+                if filename.endswith(".png"):
+                    art_key = filename.replace(".png", "")
+                    if art_key not in class_arts:
+                        class_arts[art_key] = download_artifact_b64(run_id, path)
+            if class_arts:
+                artifacts_by_class[class_label] = class_arts
+    else:
+        artifacts_by_class = {}
+
+    # ── Stage 05: SHAP artifacts ──────────────────────────────────────────
+    print(f"  [{key}] SHAP run: {dataset_cfg['shap_run']}")
+    shap_run = get_latest_run(client, experiment_id, dataset_cfg["shap_run"])
+    shap_artifacts: dict[str, str | None] = {}
+    if shap_run:
+        for art_key, art_path in SHAP_DISPLAY_ARTIFACTS.items():
+            shap_artifacts[art_key] = download_artifact_b64(shap_run.info.run_id, art_path)
 
     return {
         "key": key,
@@ -373,6 +419,8 @@ def build_dataset_block(
         "conformal": conformal,
         "conformal_artifacts": conformal_artifacts,
         "artifacts": artifacts,
+        "artifacts_by_class": artifacts_by_class,
+        "shap_artifacts": shap_artifacts,
     }
 
 

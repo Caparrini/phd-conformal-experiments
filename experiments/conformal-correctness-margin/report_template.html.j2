@@ -194,6 +194,9 @@
     .lightbox-overlay img {
       max-width: 95vw;
       max-height: 95vh;
+      width: auto;          /* override base img { width: 100% } */
+      height: auto;         /* explicit for aspect-ratio safety */
+      object-fit: contain;  /* never distort */
       border: none;
       border-radius: 0;
       margin: 0;
@@ -304,6 +307,7 @@
   <a href="#{{ ds.key }}-model">↓ Model</a>
   <a href="#{{ ds.key }}-conformal">↓ Conformal</a>
   <a href="#{{ ds.key }}-fcod">↓ FCOD</a>
+  <a href="#{{ ds.key }}-shap">↓ SHAP</a>
 </nav>
 
 {# ── Model performance ───────────────────────────────────────────────────── #}
@@ -626,6 +630,137 @@
 
 </div>{# /figures #}
 {% endif %}{# end if artifacts #}
+
+{# ── Per-class FCOD ───────────────────────────────────────────────────────── #}
+{% if ds.artifacts_by_class %}
+{% for class_label, class_arts in ds.artifacts_by_class.items() %}
+<h4>FCOD — {{ class_label.replace('_', ' ').title() }}</h4>
+<div class="figures">
+
+  {% if 'fcod_with_ci' in class_arts and class_arts['fcod_with_ci'] %}
+  <div class="figure-block">
+    <img src="data:image/png;base64,{{ class_arts['fcod_with_ci'] }}"
+         alt="FCOD by feature with 95% bootstrap CI — {{ class_label }}">
+    <p class="caption">Outcome FCODs by feature (with 95% bootstrap CI) — {{ class_label.replace('_', ' ').title() }}</p>
+  </div>
+  {% endif %}
+
+  {% if 'fcod_stacked' in class_arts and class_arts['fcod_stacked'] %}
+  <div class="figure-block">
+    <img src="data:image/png;base64,{{ class_arts['fcod_stacked'] }}"
+         alt="Stacked outcome distribution — {{ class_label }}">
+    <p class="caption">Stacked outcome distribution — {{ class_label.replace('_', ' ').title() }}</p>
+  </div>
+  {% endif %}
+
+  {% set cls_secondary_keys = ['outcome_by_category', 'fcod_sc_si_grid', 'fcod_sc_mc_grid'] %}
+  {% set cls_secondary = [] %}
+  {% for k in cls_secondary_keys %}
+    {% if k in class_arts and class_arts[k] %}
+      {% set _ = cls_secondary.append((k, class_arts[k])) %}
+    {% endif %}
+  {% endfor %}
+  {% if cls_secondary | length > 0 %}
+  <div class="figure-grid figure-grid-2">
+    {% for art_key, b64 in cls_secondary %}
+    <div class="figure-block">
+      <img src="data:image/png;base64,{{ b64 }}" alt="{{ art_key.replace('_', ' ').title() }}">
+      <p class="caption">{{ art_key.replace('_', ' ').title() }}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% set cls_shown = ['fcod_with_ci', 'fcod_stacked', 'outcome_by_category', 'fcod_sc_si_grid', 'fcod_sc_mc_grid'] %}
+  {% set cls_extras = [] %}
+  {% for art_key, b64 in class_arts.items() %}
+    {% if art_key not in cls_shown and b64 %}
+      {% set _ = cls_extras.append((art_key, b64)) %}
+    {% endif %}
+  {% endfor %}
+  {% if cls_extras | length > 1 %}
+  <div class="figure-grid figure-grid-2">
+    {% for art_key, b64 in cls_extras %}
+    <div class="figure-block">
+      <img src="data:image/png;base64,{{ b64 }}" alt="{{ art_key }}">
+      <p class="caption">{{ art_key.replace('_', ' ').title() }}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% elif cls_extras | length == 1 %}
+  <div class="figure-block">
+    <img src="data:image/png;base64,{{ cls_extras[0][1] }}" alt="{{ cls_extras[0][0] }}">
+    <p class="caption">{{ cls_extras[0][0].replace('_', ' ').title() }}</p>
+  </div>
+  {% endif %}
+
+</div>{# /figures #}
+{% endfor %}
+{% endif %}{# end if artifacts_by_class #}
+
+{# ── SHAP explainability ─────────────────────────────────────────────────── #}
+<h3 id="{{ ds.key }}-shap">SHAP Explainability (Margin Analysis)</h3>
+{% if ds.shap_artifacts %}
+<div class="figures">
+
+  {# Margin beeswarm — full width #}
+  {% if ds.shap_artifacts.margin_beeswarm_all %}
+  <div class="figure-block">
+    <img src="data:image/png;base64,{{ ds.shap_artifacts.margin_beeswarm_all }}"
+         alt="Margin SHAP beeswarm (all)">
+    <p class="caption">SHAP beeswarm — Conformal Margin (all samples)</p>
+  </div>
+  {% endif %}
+
+  {# Confidence + Credibility beeswarms — 2-col #}
+  {% set beeswarm_pair = [] %}
+  {% if ds.shap_artifacts.confidence_beeswarm_all %}{% set _ = beeswarm_pair.append(('confidence_beeswarm_all', ds.shap_artifacts.confidence_beeswarm_all, 'SHAP beeswarm — Confidence (all samples)')) %}{% endif %}
+  {% if ds.shap_artifacts.credibility_beeswarm_all %}{% set _ = beeswarm_pair.append(('credibility_beeswarm_all', ds.shap_artifacts.credibility_beeswarm_all, 'SHAP beeswarm — Credibility (all samples)')) %}{% endif %}
+  {% if beeswarm_pair | length > 0 %}
+  <div class="figure-grid figure-grid-2">
+    {% for _, b64, caption in beeswarm_pair %}
+    <div class="figure-block">
+      <img src="data:image/png;base64,{{ b64 }}" alt="{{ caption }}">
+      <p class="caption">{{ caption }}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# Dependence plots — 2-col #}
+  {% set dep_pair = [] %}
+  {% if ds.shap_artifacts.dependence_numeric_margin %}{% set _ = dep_pair.append((ds.shap_artifacts.dependence_numeric_margin, 'SHAP dependence — numeric features (margin)')) %}{% endif %}
+  {% if ds.shap_artifacts.dependence_categorical_margin %}{% set _ = dep_pair.append((ds.shap_artifacts.dependence_categorical_margin, 'SHAP dependence — categorical features (margin)')) %}{% endif %}
+  {% if dep_pair | length > 0 %}
+  <div class="figure-grid figure-grid-2">
+    {% for b64, caption in dep_pair %}
+    <div class="figure-block">
+      <img src="data:image/png;base64,{{ b64 }}" alt="{{ caption }}">
+      <p class="caption">{{ caption }}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# Feature importance + heatmap — 2-col #}
+  {% set imp_pair = [] %}
+  {% if ds.shap_artifacts.importance_margin %}{% set _ = imp_pair.append((ds.shap_artifacts.importance_margin, 'SHAP feature importance — Margin')) %}{% endif %}
+  {% if ds.shap_artifacts.importance_heatmap %}{% set _ = imp_pair.append((ds.shap_artifacts.importance_heatmap, 'SHAP importance heatmap')) %}{% endif %}
+  {% if imp_pair | length > 0 %}
+  <div class="figure-grid figure-grid-2">
+    {% for b64, caption in imp_pair %}
+    <div class="figure-block">
+      <img src="data:image/png;base64,{{ b64 }}" alt="{{ caption }}">
+      <p class="caption">{{ caption }}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+</div>{# /figures #}
+{% else %}
+<div class="missing-run">No SHAP run or artifacts found ({{ ds.key }}-shap-analysis).</div>
+{% endif %}{# end if shap_artifacts #}
 
 </section>
 {% endfor %}{# end for datasets #}
