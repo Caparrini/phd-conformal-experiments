@@ -298,6 +298,189 @@ def _(X_test, alpha, math, np, plt, prediction_sets, y_test):
     return N_CAT_COLS, cat_features, plot_outcome_distribution_by_category
 
 
+# === Per-class FCOD computation ===
+
+
+@app.cell
+def _(
+    X_test,
+    cfg,
+    compute_fcod_smoothed,
+    compute_fcod_with_ci,
+    fcod_features,
+    mo,
+    np,
+    prediction_sets,
+    y_test,
+):
+    _y_arr = np.asarray(y_test)
+    unique_classes = np.unique(_y_arr)
+
+    fcod_by_class = {}
+    fcod_ci_by_class = {}
+
+    for _cls in unique_classes:
+        _cls_mask = _y_arr == _cls
+        _X_cls = X_test[_cls_mask]
+        _ps_cls = [prediction_sets[i] for i, m in enumerate(_cls_mask) if m]
+        _y_cls = _y_arr[_cls_mask]
+
+        fcod_by_class[_cls] = {}
+        fcod_ci_by_class[_cls] = {}
+
+        for _feat, _config in fcod_features.items():
+            _fv = _X_cls[_feat].values
+            if _config["clip"] is not None:
+                _lo, _hi = _config["clip"]
+                _fmask = (_fv >= _lo) & (_fv <= _hi)
+                _fv_viz = _fv[_fmask]
+                _ps_viz = [_ps_cls[i] for i in range(len(_ps_cls)) if _fmask[i]]
+                _y_viz = _y_cls[_fmask]
+            else:
+                _fv_viz, _ps_viz, _y_viz = _fv, _ps_cls, _y_cls
+
+            _fcod = compute_fcod_smoothed(
+                _fv_viz, _ps_viz, _y_viz, n_grid=50, percentile_range=(5, 95)
+            )
+            _fcod["feature_name"] = _config["label"]
+            fcod_by_class[_cls][_feat] = _fcod
+
+            _fcod_ci = compute_fcod_with_ci(
+                _fv_viz, _ps_viz, _y_viz,
+                n_bootstrap=100, n_grid=30, confidence_level=0.95,
+                random_state=cfg.experiment.seed,
+            )
+            _fcod_ci["feature_name"] = _config["label"]
+            fcod_ci_by_class[_cls][_feat] = _fcod_ci
+
+    mo.md(f"Computed per-class FCODs for {len(unique_classes)} classes")
+    return fcod_by_class, fcod_ci_by_class, unique_classes
+
+
+@app.cell
+def _(N_COLS, alpha, fcod_ci_by_class, math, plot_fcod, plt, unique_classes):
+    def _():
+        for cls in unique_classes:
+            results = fcod_ci_by_class[cls]
+            n_features = len(results)
+            n_rows = math.ceil(n_features / N_COLS)
+            fig, axes = plt.subplots(n_rows, N_COLS, figsize=(N_COLS * 5, n_rows * 4))
+            for i in range(n_features, n_rows * N_COLS):
+                axes.flatten()[i].set_visible(False)
+            for idx, (fname, fcod) in enumerate(results.items()):
+                plot_fcod(fcod, ax=axes.flatten()[idx], show_ci=True,
+                          xlabel=fcod["feature_name"], title=fcod["feature_name"])
+            fig.suptitle(f"Outcome FCODs — Class {cls} (α={alpha})", fontsize=14, y=1.02)
+            plt.tight_layout()
+
+    _()
+    return
+
+
+@app.cell
+def _(N_COLS, alpha, fcod_by_class, math, plot_stacked_fcod, plt, unique_classes):
+    def _():
+        for cls in unique_classes:
+            results = fcod_by_class[cls]
+            n_features = len(results)
+            n_rows = math.ceil(n_features / N_COLS)
+            fig, axes = plt.subplots(n_rows, N_COLS, figsize=(N_COLS * 5, n_rows * 4))
+            for i in range(n_features, n_rows * N_COLS):
+                axes.flatten()[i].set_visible(False)
+            for idx, (fname, fcod) in enumerate(results.items()):
+                plot_stacked_fcod(fcod, ax=axes.flatten()[idx],
+                                  xlabel=fcod["feature_name"], title=fcod["feature_name"])
+            fig.suptitle(f"Outcome Distribution — Class {cls} (α={alpha})", fontsize=14, y=1.02)
+            plt.tight_layout()
+
+    _()
+    return
+
+
+@app.cell
+def _(alpha, fcod_ci_by_class, plot_multi_feature_fcod, plt, unique_classes):
+    def _():
+        for cls in unique_classes:
+            fig = plot_multi_feature_fcod(
+                fcod_ci_by_class[cls],
+                outcomes=["SC", "SI"],
+                n_cols=4,
+                show_ci=True,
+                figsize_per_plot=(6, 4),
+                share_y=False,
+            )
+            fig.suptitle(f"SC and SI Rates — Class {cls} (α={alpha})", fontsize=14, y=1.02)
+            plt.tight_layout()
+
+    _()
+    return
+
+
+@app.cell
+def _(alpha, fcod_ci_by_class, plot_uncertainty_zones, plt, unique_classes):
+    def _():
+        for cls in unique_classes:
+            fig, ax = plt.subplots(figsize=(12, 5))
+            plot_uncertainty_zones(
+                fcod_ci_by_class[cls]["age"], ax=ax,
+                safe_threshold=0.7, uncertain_threshold=0.3,
+                title=f"Decision Zones: Age — Class {cls} (α={alpha})",
+            )
+            plt.tight_layout()
+
+    _()
+    return
+
+
+@app.cell
+def _(
+    N_CAT_COLS,
+    X_test,
+    alpha,
+    cat_features,
+    math,
+    np,
+    plot_outcome_distribution_by_category,
+    plt,
+    prediction_sets,
+    unique_classes,
+    y_test,
+):
+    def _():
+        for cls in unique_classes:
+            _y_arr = np.asarray(y_test)
+            _cls_mask = _y_arr == cls
+            _X_cls = X_test[_cls_mask]
+            _ps_cls = [prediction_sets[i] for i, m in enumerate(_cls_mask) if m]
+            _y_cls = _y_arr[_cls_mask]
+
+            n_cat = len(cat_features)
+            n_cat_rows = math.ceil(n_cat / N_CAT_COLS)
+            fig, axes = plt.subplots(n_cat_rows, N_CAT_COLS, figsize=(N_CAT_COLS * 6, n_cat_rows * 5))
+            for i in range(n_cat, n_cat_rows * N_CAT_COLS):
+                axes.flatten()[i].set_visible(False)
+            for idx, (feature_name, config) in enumerate(cat_features.items()):
+                ax = axes.flatten()[idx]
+                plot_outcome_distribution_by_category(
+                    _X_cls[feature_name].values,
+                    _ps_cls,
+                    _y_cls,
+                    ax=ax,
+                    category_name=config["label"],
+                    top_n=config["top_n"],
+                    sort_by="sc_rate",
+                    ascending=False,
+                )
+            fig.suptitle(
+                f"Outcome Distribution by Category — Class {cls} (α={alpha})",
+                fontsize=14, y=1.02,
+            )
+            plt.tight_layout()
+
+    _()
+    return
+
+
 @app.cell
 def _(
     N_CAT_COLS,
@@ -308,6 +491,8 @@ def _(
     cat_features,
     cfg,
     data_path,
+    fcod_by_class,
+    fcod_ci_by_class,
     fcod_results,
     fcod_results_ci,
     math,
@@ -321,6 +506,7 @@ def _(
     plot_uncertainty_zones,
     plt,
     prediction_sets,
+    unique_classes,
     y_test,
 ):
     def _():
@@ -414,6 +600,104 @@ def _(
             fig_cat.tight_layout()
             mlflow.log_figure(fig_cat, "outcome_by_category.png")
             plt.close(fig_cat)
+
+            # === Per-class plots ===
+            for _cls in unique_classes:
+                _prefix = f"by_class/class_{_cls}"
+                _cls_fcod_ci = fcod_ci_by_class[_cls]
+                _cls_fcod_smooth = fcod_by_class[_cls]
+
+                _y_arr = np.asarray(y_test)
+                _cls_mask = _y_arr == _cls
+                _X_cls = X_test[_cls_mask]
+                _ps_cls = [prediction_sets[i] for i, m in enumerate(_cls_mask) if m]
+                _y_cls = _y_arr[_cls_mask]
+
+                # FCOD with CI
+                _n_feat_cls = len(_cls_fcod_ci)
+                _n_rows_cls = math.ceil(_n_feat_cls / N_COLS)
+                _fig_ci, _axes = plt.subplots(_n_rows_cls, N_COLS, figsize=(N_COLS * 5, _n_rows_cls * 4))
+                for i in range(_n_feat_cls, _n_rows_cls * N_COLS):
+                    _axes.flatten()[i].set_visible(False)
+                for idx, (feat, fcod) in enumerate(_cls_fcod_ci.items()):
+                    plot_fcod(fcod, ax=_axes.flatten()[idx], show_ci=True,
+                              xlabel=fcod["feature_name"], title=fcod["feature_name"])
+                _fig_ci.suptitle(f"Outcome FCODs — Class {_cls} (α={alpha})", fontsize=14, y=1.02)
+                _fig_ci.tight_layout()
+                mlflow.log_figure(_fig_ci, f"{_prefix}/fcod_with_ci.png")
+                plt.close(_fig_ci)
+
+                # Per-feature histogram
+                for _feat, _fcod in _cls_fcod_ci.items():
+                    _main_ax, _density_ax = plot_fcod(
+                        _fcod,
+                        show_ci=True,
+                        show_density=True,
+                        density_type="histogram",
+                        feature_values=_X_cls[_feat].values,
+                        xlabel=_fcod["feature_name"],
+                        title=_fcod["feature_name"],
+                    )
+                    mlflow.log_figure(_main_ax.figure, f"{_prefix}/fcod_histogram/{_feat}.png")
+                    plt.close(_main_ax.figure)
+
+                # Stacked
+                _fig_stacked, _axes = plt.subplots(_n_rows_cls, N_COLS, figsize=(N_COLS * 5, _n_rows_cls * 4))
+                for i in range(_n_feat_cls, _n_rows_cls * N_COLS):
+                    _axes.flatten()[i].set_visible(False)
+                for idx, (feat, fcod) in enumerate(_cls_fcod_smooth.items()):
+                    plot_stacked_fcod(fcod, ax=_axes.flatten()[idx],
+                                      xlabel=fcod["feature_name"], title=fcod["feature_name"])
+                _fig_stacked.suptitle(f"Outcome Distribution — Class {_cls} (α={alpha})", fontsize=14, y=1.02)
+                _fig_stacked.tight_layout()
+                mlflow.log_figure(_fig_stacked, f"{_prefix}/fcod_stacked.png")
+                plt.close(_fig_stacked)
+
+                # SC/SI grid
+                _fig_sc_si = plot_multi_feature_fcod(
+                    _cls_fcod_ci, outcomes=["SC", "SI"], n_cols=4,
+                    show_ci=True, figsize_per_plot=(6, 4),
+                )
+                _fig_sc_si.suptitle(f"SC and SI Rates — Class {_cls} (α={alpha})", fontsize=14, y=1.02)
+                _fig_sc_si.tight_layout()
+                mlflow.log_figure(_fig_sc_si, f"{_prefix}/fcod_sc_si_grid.png")
+                plt.close(_fig_sc_si)
+
+                # Uncertainty zones: age
+                _fig_zones, _ax = plt.subplots(figsize=(12, 5))
+                plot_uncertainty_zones(
+                    _cls_fcod_ci["age"], ax=_ax,
+                    safe_threshold=0.7, uncertain_threshold=0.3,
+                    title=f"Decision Zones: Age — Class {_cls} (α={alpha})",
+                )
+                mlflow.log_figure(_fig_zones, f"{_prefix}/uncertainty_zones_age.png")
+                plt.close(_fig_zones)
+
+                # Categorical
+                _n_cat = len(cat_features)
+                _n_cat_rows = math.ceil(_n_cat / N_CAT_COLS)
+                _fig_cat, _axes_cat = plt.subplots(_n_cat_rows, N_CAT_COLS, figsize=(N_CAT_COLS * 6, _n_cat_rows * 5))
+                for i in range(_n_cat, _n_cat_rows * N_CAT_COLS):
+                    _axes_cat.flatten()[i].set_visible(False)
+                for idx, (feature_name, config) in enumerate(cat_features.items()):
+                    _ax_cat = _axes_cat.flatten()[idx]
+                    plot_outcome_distribution_by_category(
+                        _X_cls[feature_name].values,
+                        _ps_cls,
+                        _y_cls,
+                        ax=_ax_cat,
+                        category_name=config["label"],
+                        top_n=config["top_n"],
+                        sort_by="sc_rate",
+                        ascending=False,
+                    )
+                _fig_cat.suptitle(
+                    f"Outcome Distribution by Category — Class {_cls} (α={alpha})",
+                    fontsize=14, y=1.02,
+                )
+                _fig_cat.tight_layout()
+                mlflow.log_figure(_fig_cat, f"{_prefix}/outcome_by_category.png")
+                plt.close(_fig_cat)
 
         return mo.md("FCOD plots logged to MLflow")
 

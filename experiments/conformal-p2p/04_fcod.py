@@ -9,6 +9,7 @@ def _():
     import marimo as mo
     from pathlib import Path
     import numpy as np
+    import math
     import matplotlib.pyplot as plt
     import mlflow
     import json
@@ -40,6 +41,7 @@ def _():
         compute_fcod_smoothed,
         compute_fcod_with_ci,
         json,
+        math,
         mlflow,
         mo,
         np,
@@ -147,7 +149,7 @@ def _(
         fcod_results_ci[feature_name] = fcod_ci
 
     mo.md(f"Computed FCODs for {len(fcod_features)} features")
-    return fcod_results, fcod_results_ci
+    return fcod_features, fcod_results, fcod_results_ci
 
 
 @app.cell
@@ -281,6 +283,156 @@ def _(X_test, alpha, plt, prediction_sets, y_test):
 
 
 @app.cell
+def _(X_test, cfg, compute_fcod_smoothed, compute_fcod_with_ci, fcod_features, mo, np, prediction_sets, y_test):
+    _y_arr = y_test.values
+    unique_classes = np.unique(_y_arr)
+
+    fcod_by_class: dict = {}
+    fcod_ci_by_class: dict = {}
+
+    for _cls in unique_classes:
+        _cls_mask = _y_arr == _cls
+        _X_cls = X_test[_cls_mask]
+        _ps_cls = [prediction_sets[i] for i, m in enumerate(_cls_mask) if m]
+        _y_cls = _y_arr[_cls_mask]
+
+        fcod_by_class[_cls] = {}
+        fcod_ci_by_class[_cls] = {}
+
+        for _feat, _config in fcod_features.items():
+            _fv = _X_cls[_feat].values
+
+            if _config["clip"] is not None:
+                _lo, _hi = _config["clip"]
+                _clip_mask = (_fv >= _lo) & (_fv <= _hi)
+                _fv_viz = _fv[_clip_mask]
+                _ps_viz = [_ps_cls[i] for i, m in enumerate(_clip_mask) if m]
+                _y_viz = _y_cls[_clip_mask]
+            else:
+                _fv_viz = _fv
+                _ps_viz = _ps_cls
+                _y_viz = _y_cls
+
+            _fcod = compute_fcod_smoothed(
+                _fv_viz, _ps_viz, _y_viz,
+                n_grid=50, percentile_range=(5, 95),
+            )
+            _fcod["feature_name"] = _config["label"]
+            fcod_by_class[_cls][_feat] = _fcod
+
+            _fcod_ci = compute_fcod_with_ci(
+                _fv_viz, _ps_viz, _y_viz,
+                n_bootstrap=100, n_grid=30, confidence_level=0.95,
+                random_state=cfg.experiment.seed,
+            )
+            _fcod_ci["feature_name"] = _config["label"]
+            fcod_ci_by_class[_cls][_feat] = _fcod_ci
+
+    mo.md(f"Computed per-class FCODs for {len(unique_classes)} classes")
+    return fcod_by_class, fcod_ci_by_class, unique_classes
+
+
+@app.cell
+def _(alpha, fcod_ci_by_class, plot_fcod, plt, unique_classes):
+    def _():
+        for cls in unique_classes:
+            results = fcod_ci_by_class[cls]
+            fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+            for idx, (feat, fcod) in enumerate(results.items()):
+                plot_fcod(fcod, ax=axes.flatten()[idx], show_ci=True,
+                          xlabel=fcod["feature_name"], title=fcod["feature_name"])
+            fig.suptitle(f"Outcome FCODs — Class {cls} (α={alpha})", fontsize=14, y=1.02)
+            plt.tight_layout()
+        return fig
+
+    _()
+    return
+
+
+@app.cell
+def _(alpha, fcod_by_class, plot_stacked_fcod, plt, unique_classes):
+    def _():
+        for cls in unique_classes:
+            results = fcod_by_class[cls]
+            fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+            for idx, (feat, fcod) in enumerate(results.items()):
+                plot_stacked_fcod(fcod, ax=axes.flatten()[idx],
+                                  xlabel=fcod["feature_name"], title=fcod["feature_name"])
+            fig.suptitle(f"Outcome Distribution — Class {cls} (α={alpha})", fontsize=14, y=1.02)
+            plt.tight_layout()
+        return fig
+
+    _()
+    return
+
+
+@app.cell
+def _(alpha, fcod_ci_by_class, plot_multi_feature_fcod, plt, unique_classes):
+    def _():
+        for cls in unique_classes:
+            fig = plot_multi_feature_fcod(
+                fcod_ci_by_class[cls],
+                outcomes=["SC", "SI"],
+                n_cols=2,
+                show_ci=True,
+                figsize_per_plot=(6, 4),
+            )
+            fig.suptitle(f"SC and SI Rates — Class {cls} (α={alpha})", fontsize=14, y=1.02)
+            plt.tight_layout()
+        return fig
+
+    _()
+    return
+
+
+@app.cell
+def _(alpha, fcod_ci_by_class, plot_uncertainty_zones, plt, unique_classes):
+    def _():
+        for cls in unique_classes:
+            fig, ax = plt.subplots(figsize=(12, 5))
+            plot_uncertainty_zones(
+                fcod_ci_by_class[cls]["fico_n"], ax=ax,
+                safe_threshold=0.7, uncertain_threshold=0.3,
+                title=f"Decision Zones: FICO Score — Class {cls} (α={alpha})",
+            )
+        return fig
+
+    _()
+    return
+
+
+@app.cell
+def _(X_test, alpha, cat_features, plot_outcome_distribution_by_category, plt, prediction_sets, unique_classes, y_test):
+    def _():
+        _y_arr_cls = y_test.values
+        for cls in unique_classes:
+            _cls_mask = _y_arr_cls == cls
+            _X_cls = X_test[_cls_mask]
+            _ps_cls = [prediction_sets[i] for i, m in enumerate(_cls_mask) if m]
+            _y_cls = _y_arr_cls[_cls_mask]
+
+            fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+            for idx, (feature_name, config) in enumerate(cat_features.items()):
+                ax = axes.flatten()[idx]
+                plot_outcome_distribution_by_category(
+                    _X_cls[feature_name].values,
+                    _ps_cls,
+                    _y_cls,
+                    ax=ax,
+                    category_name=config["label"],
+                    top_n=config["top_n"],
+                    sort_by="sc_rate",
+                    ascending=False,
+                )
+            fig.suptitle(f"Outcome Distribution by Categorical Features — Class {cls} (α={alpha})", fontsize=14, y=1.02)
+            plt.tight_layout()
+        return fig
+
+    _()
+    return
+
+
+@app.cell
 def _(
     OmegaConf,
     X_test,
@@ -288,6 +440,8 @@ def _(
     cat_features,
     cfg,
     data_path,
+    fcod_by_class,
+    fcod_ci_by_class,
     fcod_results,
     fcod_results_ci,
     mlflow,
@@ -299,6 +453,7 @@ def _(
     plot_uncertainty_zones,
     plt,
     prediction_sets,
+    unique_classes,
     y_test,
 ):
     def _():
@@ -377,6 +532,92 @@ def _(
             fig_cat.tight_layout()
             mlflow.log_figure(fig_cat, "outcome_by_category.png")
             plt.close(fig_cat)
+
+            # === Per-class plots ===
+            _y_arr = y_test.values
+            for _cls in unique_classes:
+                _prefix = f"by_class/class_{_cls}"
+                _cls_fcod_ci = fcod_ci_by_class[_cls]
+                _cls_fcod_smooth = fcod_by_class[_cls]
+
+                _cls_mask = _y_arr == _cls
+                _X_cls = X_test[_cls_mask]
+                _ps_cls = [prediction_sets[i] for i, m in enumerate(_cls_mask) if m]
+                _y_cls = _y_arr[_cls_mask]
+
+                # FCOD with CI
+                _fig_ci, _axes = plt.subplots(2, 2, figsize=(14, 10))
+                for idx, (feat, fcod) in enumerate(_cls_fcod_ci.items()):
+                    plot_fcod(fcod, ax=_axes.flatten()[idx], show_ci=True,
+                              xlabel=fcod["feature_name"], title=fcod["feature_name"])
+                _fig_ci.suptitle(f"Outcome FCODs — Class {_cls} (α={alpha})", fontsize=14, y=1.02)
+                _fig_ci.tight_layout()
+                mlflow.log_figure(_fig_ci, f"{_prefix}/fcod_with_ci.png")
+                plt.close(_fig_ci)
+
+                # Per-feature histogram
+                for _feat, _fcod in _cls_fcod_ci.items():
+                    _main_ax, _density_ax = plot_fcod(
+                        _fcod,
+                        show_ci=True,
+                        show_density=True,
+                        density_type="histogram",
+                        feature_values=_X_cls[_feat].values,
+                        xlabel=_fcod["feature_name"],
+                        title=_fcod["feature_name"],
+                    )
+                    mlflow.log_figure(_main_ax.figure, f"{_prefix}/fcod_histogram/{_feat}.png")
+                    plt.close(_main_ax.figure)
+
+                # Stacked
+                _fig_stacked, _axes = plt.subplots(2, 2, figsize=(14, 10))
+                for idx, (feat, fcod) in enumerate(_cls_fcod_smooth.items()):
+                    plot_stacked_fcod(fcod, ax=_axes.flatten()[idx],
+                                      xlabel=fcod["feature_name"], title=fcod["feature_name"])
+                _fig_stacked.suptitle(f"Outcome Distribution — Class {_cls} (α={alpha})", fontsize=14, y=1.02)
+                _fig_stacked.tight_layout()
+                mlflow.log_figure(_fig_stacked, f"{_prefix}/fcod_stacked.png")
+                plt.close(_fig_stacked)
+
+                # SC/SI grid
+                _fig_sc_si = plot_multi_feature_fcod(
+                    _cls_fcod_ci, outcomes=["SC", "SI"], n_cols=2,
+                    show_ci=True, figsize_per_plot=(6, 4),
+                )
+                _fig_sc_si.suptitle(f"SC and SI Rates — Class {_cls} (α={alpha})", fontsize=14, y=1.02)
+                _fig_sc_si.tight_layout()
+                mlflow.log_figure(_fig_sc_si, f"{_prefix}/fcod_sc_si_grid.png")
+                plt.close(_fig_sc_si)
+
+                # Uncertainty zones: FICO score
+                _fig_zones, _ax = plt.subplots(figsize=(12, 5))
+                plot_uncertainty_zones(
+                    _cls_fcod_ci["fico_n"], ax=_ax,
+                    safe_threshold=0.7, uncertain_threshold=0.3,
+                    title=f"Decision Zones: FICO Score — Class {_cls} (α={alpha})",
+                )
+                mlflow.log_figure(_fig_zones, f"{_prefix}/uncertainty_zones_fico.png")
+                plt.close(_fig_zones)
+
+                # Categorical outcome distributions
+                _fig_cat, _axes = plt.subplots(2, 2, figsize=(16, 12))
+                for idx, (feature_name, config) in enumerate(cat_features.items()):
+                    _ax = _axes.flatten()[idx]
+                    plot_outcome_distribution_by_category(
+                        _X_cls[feature_name].values,
+                        _ps_cls,
+                        _y_cls,
+                        ax=_ax,
+                        category_name=config["label"],
+                        top_n=config["top_n"],
+                        sort_by="sc_rate",
+                        ascending=False,
+                    )
+                _fig_cat.suptitle(f"Outcome Distribution by Categorical Features — Class {_cls} (α={alpha})", fontsize=14, y=1.02)
+                _fig_cat.tight_layout()
+                mlflow.log_figure(_fig_cat, f"{_prefix}/outcome_by_category.png")
+                plt.close(_fig_cat)
+
         return mo.md("FCOD plots logged to MLflow")
 
 

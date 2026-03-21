@@ -313,16 +313,204 @@ def _(X_test, alpha, math, np, plt, prediction_sets, y_test):
     return N_CAT_COLS, cat_features, plot_outcome_distribution_by_category
 
 
+# === Per-class FCOD computation ===
+
+
+@app.cell
+def _(
+    X_test,
+    cfg,
+    class_names,
+    compute_fcod_smoothed,
+    compute_fcod_with_ci,
+    fcod_features,
+    mo,
+    np,
+    prediction_sets,
+    y_test,
+    OUTCOMES,
+):
+    _y_arr = np.asarray(y_test)
+    unique_classes = np.unique(_y_arr)
+
+    fcod_by_class = {}
+    fcod_ci_by_class = {}
+
+    for _cls in unique_classes:
+        _cls_mask = _y_arr == _cls
+        _X_cls = X_test[_cls_mask]
+        _ps_cls = [prediction_sets[i] for i, m in enumerate(_cls_mask) if m]
+        _y_cls = _y_arr[_cls_mask]
+
+        fcod_by_class[_cls] = {}
+        fcod_ci_by_class[_cls] = {}
+
+        for _feat, _config in fcod_features.items():
+            _fv = _X_cls[_feat].values
+            if _config["clip"] is not None:
+                _lo, _hi = _config["clip"]
+                _fmask = (_fv >= _lo) & (_fv <= _hi)
+                _fv_viz = _fv[_fmask]
+                _ps_viz = [_ps_cls[i] for i in range(len(_ps_cls)) if _fmask[i]]
+                _y_viz = _y_cls[_fmask]
+            else:
+                _fv_viz, _ps_viz, _y_viz = _fv, _ps_cls, _y_cls
+
+            _fcod = compute_fcod_smoothed(
+                _fv_viz, _ps_viz, _y_viz, n_grid=50, percentile_range=(5, 95)
+            )
+            _fcod["feature_name"] = _config["label"]
+            fcod_by_class[_cls][_feat] = _fcod
+
+            _fcod_ci = compute_fcod_with_ci(
+                _fv_viz, _ps_viz, _y_viz,
+                n_bootstrap=100, n_grid=30, confidence_level=0.95,
+                random_state=cfg.experiment.seed,
+            )
+            _fcod_ci["feature_name"] = _config["label"]
+            fcod_ci_by_class[_cls][_feat] = _fcod_ci
+
+    mo.md(f"Computed per-class FCODs for {len(unique_classes)} classes: {[class_names[c] for c in unique_classes]}")
+    return fcod_by_class, fcod_ci_by_class, unique_classes
+
+
+@app.cell
+def _(OUTCOMES, N_COLS, alpha, class_names, fcod_ci_by_class, math, plot_fcod, plt, unique_classes):
+    def _():
+        for cls in unique_classes:
+            results = fcod_ci_by_class[cls]
+            n_features = len(results)
+            n_rows = math.ceil(n_features / N_COLS)
+            fig, axes = plt.subplots(n_rows, N_COLS, figsize=(N_COLS * 5, n_rows * 4))
+            for i in range(n_features, n_rows * N_COLS):
+                axes.flatten()[i].set_visible(False)
+            for idx, (fname, fcod) in enumerate(results.items()):
+                plot_fcod(fcod, ax=axes.flatten()[idx], outcomes=OUTCOMES, show_ci=True,
+                          xlabel=fcod["feature_name"], title=fcod["feature_name"])
+            fig.suptitle(f"Outcome FCODs — Class {class_names[cls]} (α={alpha})", fontsize=14, y=1.02)
+            plt.tight_layout()
+
+    _()
+    return
+
+
+@app.cell
+def _(OUTCOMES, N_COLS, alpha, class_names, fcod_by_class, math, plot_stacked_fcod, plt, unique_classes):
+    def _():
+        for cls in unique_classes:
+            results = fcod_by_class[cls]
+            n_features = len(results)
+            n_rows = math.ceil(n_features / N_COLS)
+            fig, axes = plt.subplots(n_rows, N_COLS, figsize=(N_COLS * 5, n_rows * 4))
+            for i in range(n_features, n_rows * N_COLS):
+                axes.flatten()[i].set_visible(False)
+            for idx, (fname, fcod) in enumerate(results.items()):
+                plot_stacked_fcod(fcod, ax=axes.flatten()[idx], outcomes=OUTCOMES,
+                                  xlabel=fcod["feature_name"], title=fcod["feature_name"])
+            fig.suptitle(f"Outcome Distribution — Class {class_names[cls]} (α={alpha})", fontsize=14, y=1.02)
+            plt.tight_layout()
+
+    _()
+    return
+
+
+@app.cell
+def _(alpha, class_names, fcod_ci_by_class, plot_multi_feature_fcod, plt, unique_classes):
+    def _():
+        for cls in unique_classes:
+            fig = plot_multi_feature_fcod(
+                fcod_ci_by_class[cls],
+                outcomes=["SC", "MC"],
+                n_cols=4,
+                show_ci=True,
+                figsize_per_plot=(6, 4),
+                share_y=False,
+            )
+            fig.suptitle(f"SC and MC Rates — Class {class_names[cls]} (α={alpha})", fontsize=14, y=1.02)
+            plt.tight_layout()
+
+    _()
+    return
+
+
+@app.cell
+def _(alpha, class_names, fcod_ci_by_class, plot_uncertainty_zones, plt, unique_classes):
+    def _():
+        for cls in unique_classes:
+            fig, ax = plt.subplots(figsize=(12, 5))
+            plot_uncertainty_zones(
+                fcod_ci_by_class[cls]["alcohol"], ax=ax,
+                safe_threshold=0.7, uncertain_threshold=0.3,
+                title=f"Decision Zones: Alcohol — Class {class_names[cls]} (α={alpha})",
+            )
+            plt.tight_layout()
+
+    _()
+    return
+
+
+@app.cell
+def _(
+    X_test,
+    alpha,
+    cat_features,
+    class_names,
+    math,
+    np,
+    plot_outcome_distribution_by_category,
+    plt,
+    prediction_sets,
+    unique_classes,
+    y_test,
+):
+    def _():
+        for cls in unique_classes:
+            _y_arr = np.asarray(y_test)
+            _cls_mask = _y_arr == cls
+            _X_cls = X_test[_cls_mask]
+            _ps_cls = [prediction_sets[i] for i, m in enumerate(_cls_mask) if m]
+            _y_cls = _y_arr[_cls_mask]
+
+            n_cat = len(cat_features)
+            # N_CAT_COLS = 1 for wine — single axes, wrap for uniform handling
+            fig, axes = plt.subplots(1, 1, figsize=(6, 5))
+            axes_flat = [axes]
+            for idx, (feature_name, config) in enumerate(cat_features.items()):
+                ax = axes_flat[idx]
+                plot_outcome_distribution_by_category(
+                    _X_cls[feature_name].values,
+                    _ps_cls,
+                    _y_cls,
+                    ax=ax,
+                    category_name=config["label"],
+                    top_n=config["top_n"],
+                    sort_by="sc_rate",
+                    ascending=False,
+                )
+            fig.suptitle(
+                f"Outcome Distribution by Category — Class {class_names[cls]} (α={alpha})",
+                fontsize=14, y=1.02,
+            )
+            plt.tight_layout()
+
+    _()
+    return
+
+
 @app.cell
 def _(
     N_CAT_COLS,
     N_COLS,
     OmegaConf,
+    OUTCOMES,
     X_test,
     alpha,
     cat_features,
     cfg,
+    class_names,
     data_path,
+    fcod_by_class,
+    fcod_ci_by_class,
     fcod_results,
     fcod_results_ci,
     math,
@@ -336,8 +524,8 @@ def _(
     plot_uncertainty_zones,
     plt,
     prediction_sets,
+    unique_classes,
     y_test,
-    OUTCOMES,
 ):
     def _():
         from dslib.tracking import tracked_run
@@ -432,6 +620,101 @@ def _(
             fig_cat.tight_layout()
             mlflow.log_figure(fig_cat, "outcome_by_category.png")
             plt.close(fig_cat)
+
+            # === Per-class plots ===
+            for _cls in unique_classes:
+                _cls_name = class_names[_cls]
+                _prefix = f"by_class/class_{_cls_name}"
+                _cls_fcod_ci = fcod_ci_by_class[_cls]
+                _cls_fcod_smooth = fcod_by_class[_cls]
+
+                _y_arr = np.asarray(y_test)
+                _cls_mask = _y_arr == _cls
+                _X_cls = X_test[_cls_mask]
+                _ps_cls = [prediction_sets[i] for i, m in enumerate(_cls_mask) if m]
+                _y_cls = _y_arr[_cls_mask]
+
+                # FCOD with CI
+                _n_feat_cls = len(_cls_fcod_ci)
+                _n_rows_cls = math.ceil(_n_feat_cls / N_COLS)
+                _fig_ci, _axes = plt.subplots(_n_rows_cls, N_COLS, figsize=(N_COLS * 5, _n_rows_cls * 4))
+                for i in range(_n_feat_cls, _n_rows_cls * N_COLS):
+                    _axes.flatten()[i].set_visible(False)
+                for idx, (feat, fcod) in enumerate(_cls_fcod_ci.items()):
+                    plot_fcod(fcod, ax=_axes.flatten()[idx], outcomes=OUTCOMES, show_ci=True,
+                              xlabel=fcod["feature_name"], title=fcod["feature_name"])
+                _fig_ci.suptitle(f"Outcome FCODs — Class {_cls_name} (α={alpha})", fontsize=14, y=1.02)
+                _fig_ci.tight_layout()
+                mlflow.log_figure(_fig_ci, f"{_prefix}/fcod_with_ci.png")
+                plt.close(_fig_ci)
+
+                # Per-feature histogram
+                for _feat, _fcod in _cls_fcod_ci.items():
+                    _main_ax, _density_ax = plot_fcod(
+                        _fcod,
+                        outcomes=OUTCOMES,
+                        show_ci=True,
+                        show_density=True,
+                        density_type="histogram",
+                        feature_values=_X_cls[_feat].values,
+                        xlabel=_fcod["feature_name"],
+                        title=_fcod["feature_name"],
+                    )
+                    mlflow.log_figure(_main_ax.figure, f"{_prefix}/fcod_histogram/{_feat}.png")
+                    plt.close(_main_ax.figure)
+
+                # Stacked
+                _fig_stacked, _axes = plt.subplots(_n_rows_cls, N_COLS, figsize=(N_COLS * 5, _n_rows_cls * 4))
+                for i in range(_n_feat_cls, _n_rows_cls * N_COLS):
+                    _axes.flatten()[i].set_visible(False)
+                for idx, (feat, fcod) in enumerate(_cls_fcod_smooth.items()):
+                    plot_stacked_fcod(fcod, ax=_axes.flatten()[idx], outcomes=OUTCOMES,
+                                      xlabel=fcod["feature_name"], title=fcod["feature_name"])
+                _fig_stacked.suptitle(f"Outcome Distribution — Class {_cls_name} (α={alpha})", fontsize=14, y=1.02)
+                _fig_stacked.tight_layout()
+                mlflow.log_figure(_fig_stacked, f"{_prefix}/fcod_stacked.png")
+                plt.close(_fig_stacked)
+
+                # SC/MC grid
+                _fig_sc_mc = plot_multi_feature_fcod(
+                    _cls_fcod_ci, outcomes=["SC", "MC"], n_cols=4,
+                    show_ci=True, figsize_per_plot=(6, 4),
+                )
+                _fig_sc_mc.suptitle(f"SC and MC Rates — Class {_cls_name} (α={alpha})", fontsize=14, y=1.02)
+                _fig_sc_mc.tight_layout()
+                mlflow.log_figure(_fig_sc_mc, f"{_prefix}/fcod_sc_mc_grid.png")
+                plt.close(_fig_sc_mc)
+
+                # Uncertainty zones: alcohol
+                _fig_zones, _ax = plt.subplots(figsize=(12, 5))
+                plot_uncertainty_zones(
+                    _cls_fcod_ci["alcohol"], ax=_ax,
+                    safe_threshold=0.7, uncertain_threshold=0.3,
+                    title=f"Decision Zones: Alcohol — Class {_cls_name} (α={alpha})",
+                )
+                mlflow.log_figure(_fig_zones, f"{_prefix}/uncertainty_zones_alcohol.png")
+                plt.close(_fig_zones)
+
+                # Categorical (single feature for wine)
+                _fig_cat, _ax_cat = plt.subplots(1, 1, figsize=(6, 5))
+                for feature_name, config in cat_features.items():
+                    plot_outcome_distribution_by_category(
+                        _X_cls[feature_name].values,
+                        _ps_cls,
+                        _y_cls,
+                        ax=_ax_cat,
+                        category_name=config["label"],
+                        top_n=config["top_n"],
+                        sort_by="sc_rate",
+                        ascending=False,
+                    )
+                _fig_cat.suptitle(
+                    f"Outcome Distribution by Category — Class {_cls_name} (α={alpha})",
+                    fontsize=14, y=1.02,
+                )
+                _fig_cat.tight_layout()
+                mlflow.log_figure(_fig_cat, f"{_prefix}/outcome_by_category.png")
+                plt.close(_fig_cat)
 
         return mo.md("FCOD plots logged to MLflow")
 
