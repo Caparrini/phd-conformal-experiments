@@ -21,3 +21,9 @@ wheels/
 
 # marimo
 __marimo__/
+
+# CLAUDE
+CLAUDE.md
+
+# .html
+*.html
