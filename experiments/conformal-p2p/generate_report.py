@@ -346,7 +346,7 @@ def build_context(
 
         all_paths = list_artifacts_flat(client, run_id)
         for path in all_paths:
-            if path.startswith("by_class/"):
+            if path.startswith("by_class/") or path.startswith("by_class_stacked/"):
                 continue  # handled separately below
             filename = Path(path).name
             if filename.endswith(".png"):
@@ -373,8 +373,19 @@ def build_context(
                         class_arts[art_key] = download_artifact_b64(run_id, path)
             if class_arts:
                 fcod_artifacts_by_class[class_label] = class_arts
+
+        # Collect per-feature stacked-by-class artifacts
+        fcod_artifacts_by_class_stacked: dict[str, str | None] = {}
+        stacked_paths = sorted(
+            p for p in all_paths
+            if p.startswith("by_class_stacked/") and p.endswith(".png")
+        )
+        for path in stacked_paths:
+            feat_name = Path(path).stem
+            fcod_artifacts_by_class_stacked[feat_name] = download_artifact_b64(run_id, path)
     else:
         fcod_artifacts_by_class = {}
+        fcod_artifacts_by_class_stacked = {}
 
     # ── Stage 06: SHAP ───────────────────────────────────────────────────────
     print(f"  SHAP run: {RUN_NAMES['shap']}")
@@ -397,6 +408,7 @@ def build_context(
         "conformal_artifacts": conformal_artifacts,
         "fcod_artifacts":  fcod_artifacts,
         "fcod_artifacts_by_class": fcod_artifacts_by_class,
+        "fcod_artifacts_by_class_stacked": fcod_artifacts_by_class_stacked,
         "shap_artifacts":  shap_artifacts,
     }
 

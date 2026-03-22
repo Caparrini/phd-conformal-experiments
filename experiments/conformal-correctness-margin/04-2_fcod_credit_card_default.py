@@ -715,6 +715,41 @@ def _(
                 mlflow.log_figure(_fig_cat, f"{_prefix}/outcome_by_category.png", save_kwargs={"bbox_inches": "tight"})
                 plt.close(_fig_cat)
 
+            # === Stacked FCOD by class (per feature) ===
+            _fv_by_class = {}
+            _y_arr = np.asarray(y_test)
+            for _cls in unique_classes:
+                _cls_mask = _y_arr == _cls
+                _X_cls = X_test[_cls_mask]
+                _fv_by_class[_cls] = {
+                    feat: _X_cls[feat].values for feat in fcod_by_class[_cls]
+                }
+
+            _features = list(fcod_by_class[unique_classes[0]].keys())
+            for _feat in _features:
+                _fcod_feat = {c: fcod_by_class[c][_feat] for c in unique_classes}
+                _fv_feat = {c: _fv_by_class[c][_feat] for c in unique_classes}
+                _fig_stacked_cls = plot_stacked_fcod(
+                    {},
+                    fcod_by_class=_fcod_feat,
+                    feature_values_by_class=_fv_feat,
+                    class_names={c: f"Class {c}" for c in unique_classes},
+                    figsize=(6, 4),
+                    show_density=True,
+                    show_std=False,
+                    title=_feat,
+                )
+                _fig_stacked_cls.suptitle(
+                    f"Stacked FCOD by Class — {_feat} (α={alpha})",
+                    fontsize=14, y=1.01,
+                )
+                mlflow.log_figure(
+                    _fig_stacked_cls,
+                    f"by_class_stacked/{_feat}.png",
+                    save_kwargs={"bbox_inches": "tight"},
+                )
+                plt.close(_fig_stacked_cls)
+
         return mo.md("FCOD plots logged to MLflow")
 
     _()

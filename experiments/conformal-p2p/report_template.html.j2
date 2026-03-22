@@ -554,6 +554,24 @@
 </div>{# /figures #}
 {% endif %}{# end if fcod_artifacts #}
 
+{# ── Stacked FCOD by class (per feature) ─────────────────────────────────── #}
+{% if fcod_artifacts_by_class_stacked %}
+<h3>Stacked FCOD by Class (per feature)</h3>
+<div class="figures">
+  <div class="figure-grid figure-grid-2">
+    {% for feat_name, b64 in fcod_artifacts_by_class_stacked.items() %}
+    {% if b64 %}
+    <div class="figure-block">
+      <img src="data:image/png;base64,{{ b64 }}"
+           alt="Stacked FCOD by class — {{ feat_name }}">
+      <p class="caption">{{ feat_name.replace('_', ' ').title() }}</p>
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
 {# ── Per-class FCOD ───────────────────────────────────────────────────────── #}
 {% if fcod_artifacts_by_class %}
 {% for class_label, class_arts in fcod_artifacts_by_class.items() %}

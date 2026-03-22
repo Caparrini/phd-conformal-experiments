@@ -372,7 +372,7 @@ def build_dataset_block(
         # Collect any additional PNG artifacts not already fetched
         all_paths = list_artifacts_flat(client, run_id)
         for path in all_paths:
-            if path.startswith("by_class/"):
+            if path.startswith("by_class/") or path.startswith("by_class_stacked/"):
                 continue  # handled separately below
             filename = Path(path).name
             if filename.endswith(".png"):
@@ -399,8 +399,19 @@ def build_dataset_block(
                         class_arts[art_key] = download_artifact_b64(run_id, path)
             if class_arts:
                 artifacts_by_class[class_label] = class_arts
+
+        # Collect per-feature stacked-by-class artifacts
+        artifacts_by_class_stacked: dict[str, str | None] = {}
+        stacked_paths = sorted(
+            p for p in all_paths
+            if p.startswith("by_class_stacked/") and p.endswith(".png")
+        )
+        for path in stacked_paths:
+            feat_name = Path(path).stem
+            artifacts_by_class_stacked[feat_name] = download_artifact_b64(run_id, path)
     else:
         artifacts_by_class = {}
+        artifacts_by_class_stacked = {}
 
     # ── Stage 05: SHAP artifacts ──────────────────────────────────────────
     print(f"  [{key}] SHAP run: {dataset_cfg['shap_run']}")
@@ -420,6 +431,7 @@ def build_dataset_block(
         "conformal_artifacts": conformal_artifacts,
         "artifacts": artifacts,
         "artifacts_by_class": artifacts_by_class,
+        "artifacts_by_class_stacked": artifacts_by_class_stacked,
         "shap_artifacts": shap_artifacts,
     }
 
