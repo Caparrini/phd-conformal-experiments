@@ -20,8 +20,10 @@ def _():
     from conformalpy.fcod import (
         compute_fcod_smoothed,
         compute_fcod_with_ci,
+        merge_uncertain_outcomes,
         plot_fcod,
         plot_stacked_fcod,
+        plot_stacked_bars_by_class,
         plot_multi_feature_fcod,
         plot_uncertainty_zones,
     )
@@ -40,6 +42,7 @@ def _():
         cfg,
         compute_fcod_smoothed,
         compute_fcod_with_ci,
+        merge_uncertain_outcomes,
         json,
         math,
         mlflow,
@@ -47,6 +50,7 @@ def _():
         np,
         plot_fcod,
         plot_multi_feature_fcod,
+        plot_stacked_bars_by_class,
         plot_stacked_fcod,
         plot_uncertainty_zones,
         plt,
@@ -165,8 +169,11 @@ def _(
         fcod_ci["feature_name"] = config["label"]
         fcod_results_ci[feature_name] = fcod_ci
 
+    fcod_results_merged = {k: merge_uncertain_outcomes(v) for k, v in fcod_results.items()}
+    fcod_results_ci_merged = {k: merge_uncertain_outcomes(v) for k, v in fcod_results_ci.items()}
+
     mo.md(f"Computed FCODs for {len(fcod_features)} features")
-    return N_COLS, fcod_features, fcod_results, fcod_results_ci
+    return N_COLS, fcod_features, fcod_results, fcod_results_ci, fcod_results_merged, fcod_results_ci_merged
 
 
 @app.cell
@@ -369,8 +376,17 @@ def _(
             _fcod_ci["feature_name"] = _config["label"]
             fcod_ci_by_class[_cls][_feat] = _fcod_ci
 
+    fcod_by_class_merged = {
+        cls: {k: merge_uncertain_outcomes(v) for k, v in d.items()}
+        for cls, d in fcod_by_class.items()
+    }
+    fcod_ci_by_class_merged = {
+        cls: {k: merge_uncertain_outcomes(v) for k, v in d.items()}
+        for cls, d in fcod_ci_by_class.items()
+    }
+
     mo.md(f"Computed per-class FCODs for {len(unique_classes)} classes")
-    return fcod_by_class, fcod_ci_by_class, unique_classes
+    return fcod_by_class, fcod_ci_by_class, fcod_by_class_merged, fcod_ci_by_class_merged, unique_classes
 
 
 @app.cell
@@ -508,9 +524,13 @@ def _(
     cfg,
     data_path,
     fcod_by_class,
+    fcod_by_class_merged,
     fcod_ci_by_class,
+    fcod_ci_by_class_merged,
     fcod_results,
     fcod_results_ci,
+    fcod_results_ci_merged,
+    fcod_results_merged,
     math,
     mlflow,
     mo,
@@ -518,6 +538,7 @@ def _(
     plot_fcod,
     plot_multi_feature_fcod,
     plot_outcome_distribution_by_category,
+    plot_stacked_bars_by_class,
     plot_stacked_fcod,
     plot_uncertainty_zones,
     plt,
@@ -749,6 +770,146 @@ def _(
                     save_kwargs={"bbox_inches": "tight"},
                 )
                 plt.close(_fig_stacked_cls)
+
+            # === Stacked bars by class — vertical layout (one row per class) ===
+            for _feat in _features:
+                _fcod_feat = {c: fcod_by_class[c][_feat] for c in unique_classes}
+                _fv_feat = {c: _fv_by_class[c][_feat] for c in unique_classes}
+                _label = fcod_by_class[unique_classes[0]][_feat].get("feature_name", _feat)
+                _fig_bars = plot_stacked_bars_by_class(
+                    _fcod_feat,
+                    _fv_feat,
+                    class_names={c: f"Class {c}" for c in unique_classes},
+                    xlabel=_label,
+                    title=f"{_label} (α={alpha})",
+                    alpha=alpha,
+                )
+                mlflow.log_figure(
+                    _fig_bars,
+                    f"stacked_bars_by_class/{_feat}.png",
+                    save_kwargs={"bbox_inches": "tight"},
+                )
+                plt.close(_fig_bars)
+
+            # === Merged uncertain outcomes (TS0+TS1 → TS) ===
+
+            # Merged FCOD line plots with CI
+            _n_feat_m = len(fcod_results_ci_merged)
+            _n_rows_m = math.ceil(_n_feat_m / N_COLS)
+            fig_ci_m, axes_m = plt.subplots(_n_rows_m, N_COLS, figsize=(N_COLS * 5, _n_rows_m * 4))
+            for i in range(_n_feat_m, _n_rows_m * N_COLS):
+                axes_m.flatten()[i].set_visible(False)
+            for idx, (feature_name, fcod) in enumerate(fcod_results_ci_merged.items()):
+                plot_fcod(fcod, ax=axes_m.flatten()[idx], show_ci=True,
+                          xlabel=fcod["feature_name"], title=fcod["feature_name"])
+            fig_ci_m.suptitle(f"Outcome FCODs by Feature — Merged TS (α={alpha})", fontsize=14, y=1.02)
+            fig_ci_m.tight_layout()
+            mlflow.log_figure(fig_ci_m, "merged/fcod_with_ci.png", save_kwargs={"bbox_inches": "tight"})
+            plt.close(fig_ci_m)
+
+            # Merged stacked area plots (grid)
+            fig_stacked_m, axes_m = plt.subplots(_n_rows_m, N_COLS, figsize=(N_COLS * 5, _n_rows_m * 4))
+            for i in range(_n_feat_m, _n_rows_m * N_COLS):
+                axes_m.flatten()[i].set_visible(False)
+            for idx, (feature_name, fcod) in enumerate(fcod_results_merged.items()):
+                plot_stacked_fcod(fcod, ax=axes_m.flatten()[idx],
+                                  xlabel=fcod["feature_name"], title=fcod["feature_name"])
+            fig_stacked_m.suptitle(f"Outcome Distribution — Merged TS (α={alpha})", fontsize=14, y=1.02)
+            fig_stacked_m.tight_layout()
+            mlflow.log_figure(fig_stacked_m, "merged/fcod_stacked.png", save_kwargs={"bbox_inches": "tight"})
+            plt.close(fig_stacked_m)
+
+            # Merged per-feature stacked + density
+            for _feature_name, _fcod in fcod_results_merged.items():
+                _result = plot_stacked_fcod(
+                    _fcod,
+                    show_density=True,
+                    density_type="histogram",
+                    feature_values=X_test[_feature_name].values,
+                    xlabel=_fcod["feature_name"],
+                    title=_fcod["feature_name"],
+                )
+                _fig_sd = _result[0].figure if isinstance(_result, tuple) else _result.figure
+                mlflow.log_figure(_fig_sd, f"merged/fcod_stacked_density/{_feature_name}.png", save_kwargs={"bbox_inches": "tight"})
+                plt.close(_fig_sd)
+
+            # Merged per-feature FCOD + density
+            for _feature_name, _fcod in fcod_results_ci_merged.items():
+                _main_ax_m, _density_ax_m = plot_fcod(
+                    _fcod,
+                    show_ci=True,
+                    show_density=True,
+                    density_type="histogram",
+                    feature_values=X_test[_feature_name].values,
+                    xlabel=_fcod["feature_name"],
+                    title=_fcod["feature_name"],
+                )
+                mlflow.log_figure(_main_ax_m.figure, f"merged/fcod_histogram/{_feature_name}.png", save_kwargs={"bbox_inches": "tight"})
+                plt.close(_main_ax_m.figure)
+
+            # Non-merged per-feature stacked + density
+            for _feature_name, _fcod in fcod_results.items():
+                _result = plot_stacked_fcod(
+                    _fcod,
+                    show_density=True,
+                    density_type="histogram",
+                    feature_values=X_test[_feature_name].values,
+                    xlabel=_fcod["feature_name"],
+                    title=_fcod["feature_name"],
+                )
+                _fig_sd = _result[0].figure if isinstance(_result, tuple) else _result.figure
+                mlflow.log_figure(_fig_sd, f"fcod_stacked_density/{_feature_name}.png", save_kwargs={"bbox_inches": "tight"})
+                plt.close(_fig_sd)
+
+            # Merged per-class artifacts
+            for _cls in unique_classes:
+                _prefix_m = f"merged/by_class/class_{_cls}"
+                _cls_fcod_ci_m = fcod_ci_by_class_merged[_cls]
+                _cls_fcod_m = fcod_by_class_merged[_cls]
+
+                _y_arr = np.asarray(y_test)
+                _cls_mask = _y_arr == _cls
+                _X_cls = X_test[_cls_mask]
+
+                # Merged FCOD with CI
+                _n_feat_cls_m = len(_cls_fcod_ci_m)
+                _n_rows_cls_m = math.ceil(_n_feat_cls_m / N_COLS)
+                _fig_ci_m2, _axes_m2 = plt.subplots(_n_rows_cls_m, N_COLS, figsize=(N_COLS * 5, _n_rows_cls_m * 4))
+                for i in range(_n_feat_cls_m, _n_rows_cls_m * N_COLS):
+                    _axes_m2.flatten()[i].set_visible(False)
+                for idx, (feat, fcod) in enumerate(_cls_fcod_ci_m.items()):
+                    plot_fcod(fcod, ax=_axes_m2.flatten()[idx], show_ci=True,
+                              xlabel=fcod["feature_name"], title=fcod["feature_name"])
+                _fig_ci_m2.suptitle(f"Outcome FCODs — Class {_cls}, Merged TS (α={alpha})", fontsize=14, y=1.02)
+                _fig_ci_m2.tight_layout()
+                mlflow.log_figure(_fig_ci_m2, f"{_prefix_m}/fcod_with_ci.png", save_kwargs={"bbox_inches": "tight"})
+                plt.close(_fig_ci_m2)
+
+                # Merged stacked grid per class
+                _fig_stacked_m2, _axes_m2 = plt.subplots(_n_rows_cls_m, N_COLS, figsize=(N_COLS * 5, _n_rows_cls_m * 4))
+                for i in range(_n_feat_cls_m, _n_rows_cls_m * N_COLS):
+                    _axes_m2.flatten()[i].set_visible(False)
+                for idx, (feat, fcod) in enumerate(_cls_fcod_m.items()):
+                    plot_stacked_fcod(fcod, ax=_axes_m2.flatten()[idx],
+                                      xlabel=fcod["feature_name"], title=fcod["feature_name"])
+                _fig_stacked_m2.suptitle(f"Outcome Distribution — Class {_cls}, Merged TS (α={alpha})", fontsize=14, y=1.02)
+                _fig_stacked_m2.tight_layout()
+                mlflow.log_figure(_fig_stacked_m2, f"{_prefix_m}/fcod_stacked.png", save_kwargs={"bbox_inches": "tight"})
+                plt.close(_fig_stacked_m2)
+
+                # Merged per-feature stacked + density per class
+                for _feat, _fcod in _cls_fcod_m.items():
+                    _result = plot_stacked_fcod(
+                        _fcod,
+                        show_density=True,
+                        density_type="histogram",
+                        feature_values=_X_cls[_feat].values,
+                        xlabel=_fcod["feature_name"],
+                        title=_fcod["feature_name"],
+                    )
+                    _fig_sd = _result[0].figure if isinstance(_result, tuple) else _result.figure
+                    mlflow.log_figure(_fig_sd, f"{_prefix_m}/fcod_stacked_density/{_feat}.png", save_kwargs={"bbox_inches": "tight"})
+                    plt.close(_fig_sd)
 
         return mo.md("FCOD plots logged to MLflow")
 
