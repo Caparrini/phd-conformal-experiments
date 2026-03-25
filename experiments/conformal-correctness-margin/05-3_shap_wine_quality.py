@@ -251,7 +251,7 @@ def _(
 @app.cell
 def _(
     X_explain_df, all_cols, cat_categories, categorical_cols,
-    int_to_cat, mo, np, numeric_cols, plt, shap_margin,
+    int_to_cat, mo, n_classes, np, numeric_cols, plt, shap_margin, y_explain,
 ):
     _importance = np.abs(shap_margin).mean(axis=0)
 
@@ -267,19 +267,31 @@ def _(
 
     # Numeric 2×2 dependence (top-4)
     fig_dep_margin_num, _axes_num = plt.subplots(2, 2, figsize=(12, 8), squeeze=False)
+    _unique_classes = np.unique(y_explain)
+    _tab10 = plt.cm.tab10
     for _i, _col in enumerate(_top_num_cols):
         _ax = _axes_num[_i // 2, _i % 2]
         _col_i = numeric_cols.index(_col)
-        _color_col = _top_num_cols[(_i + 1) % len(_top_num_cols)]
-        _sc = _ax.scatter(
-            X_explain_df[_col].values, shap_margin[:, _col_i],
-            c=X_explain_df[_color_col].values, cmap="coolwarm", alpha=0.6, s=20,
-        )
+        _x_vals = X_explain_df[_col].values
+        _y_vals = shap_margin[:, _col_i]
+        _ax.scatter(_x_vals, _y_vals, color="steelblue", alpha=0.5, s=20, edgecolors="white", linewidths=0.3)
         _ax.axhline(0, color="gray", lw=0.8, linestyle="--")
+        # Global OLS line
+        _x_range = np.linspace(_x_vals.min(), _x_vals.max(), 200)
+        _coeffs = np.polyfit(_x_vals, _y_vals, 1)
+        _ax.plot(_x_range, np.polyval(_coeffs, _x_range), color="black", lw=2, label="Global OLS", zorder=5)
+        # Per-class OLS lines
+        for _ci, _cls in enumerate(_unique_classes):
+            _cls_mask = y_explain == _cls
+            if _cls_mask.sum() > 1:
+                _cx, _cy = _x_vals[_cls_mask], _y_vals[_cls_mask]
+                _c_coeffs = np.polyfit(_cx, _cy, 1)
+                _cx_range = np.linspace(_cx.min(), _cx.max(), 200)
+                _ax.plot(_cx_range, np.polyval(_c_coeffs, _cx_range), color=_tab10(_ci / max(len(_unique_classes) - 1, 1)), lw=1.8, linestyle="--", label=f"Class {_cls}", zorder=5)
+        _ax.legend(fontsize=7, loc="best")
         _ax.set_xlabel(_col)
         _ax.set_ylabel(f"SHAP(margin) — {_col}")
-        _ax.set_title(f"{_col}  [color={_color_col}]")
-        plt.colorbar(_sc, ax=_ax, fraction=0.04)
+        _ax.set_title(_col)
     plt.suptitle("SHAP(Margin) Dependence — Top-4 Numeric Features", fontsize=12, y=1.01)
     plt.tight_layout()
 

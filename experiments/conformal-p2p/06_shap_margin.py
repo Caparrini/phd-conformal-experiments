@@ -340,31 +340,33 @@ def _(
     numeric_cols,
     plt,
     shap_margin,
+    y_explain,
 ):
     # Numeric dependence plots — 2×2 grid, each numeric feature vs SHAP(margin)
-    # Color by another numeric feature for interaction hint
-    _color_pairs = {
-        numeric_cols[0]: numeric_cols[1],
-        numeric_cols[1]: numeric_cols[0],
-        numeric_cols[2]: numeric_cols[3],
-        numeric_cols[3]: numeric_cols[2],
-    }
-
     fig_dep_margin_num, _axes_num = plt.subplots(2, 2, figsize=(12, 8))
+    _class_colors_m = {0: "#e74c3c", 1: "#2ecc71"}
     for _i, _col in enumerate(numeric_cols):
         _ax = _axes_num[_i // 2, _i % 2]
-        _color_col = _color_pairs[_col]
-        _sc = _ax.scatter(
-            X_explain_df[_col].values,
-            shap_margin[:, _i],
-            c=X_explain_df[_color_col].values,
-            cmap="coolwarm", alpha=0.6, s=20,
-        )
+        _x_vals = X_explain_df[_col].values
+        _y_vals = shap_margin[:, _i]
+        _ax.scatter(_x_vals, _y_vals, color="steelblue", alpha=0.5, s=20, edgecolors="white", linewidths=0.3)
         _ax.axhline(0, color="gray", lw=0.8, linestyle="--")
+        # Global OLS line
+        _x_range = np.linspace(_x_vals.min(), _x_vals.max(), 200)
+        _coeffs = np.polyfit(_x_vals, _y_vals, 1)
+        _ax.plot(_x_range, np.polyval(_coeffs, _x_range), color="black", lw=2, label="Global OLS", zorder=5)
+        # Per-class OLS lines
+        for _cls, _cls_color in _class_colors_m.items():
+            _cls_mask = y_explain == _cls
+            if _cls_mask.sum() > 1:
+                _cx, _cy = _x_vals[_cls_mask], _y_vals[_cls_mask]
+                _c_coeffs = np.polyfit(_cx, _cy, 1)
+                _cx_range = np.linspace(_cx.min(), _cx.max(), 200)
+                _ax.plot(_cx_range, np.polyval(_c_coeffs, _cx_range), color=_cls_color, lw=1.8, linestyle="--", label=f"Class {_cls}", zorder=5)
+        _ax.legend(fontsize=7, loc="best")
         _ax.set_xlabel(_col)
         _ax.set_ylabel(f"SHAP(margin) — {_col}")
-        _ax.set_title(f"{_col}  [color={_color_col}]")
-        plt.colorbar(_sc, ax=_ax, fraction=0.04)
+        _ax.set_title(_col)
     plt.suptitle("SHAP(Margin) Dependence — Numeric Features", fontsize=12, y=1.01)
     plt.tight_layout()
 
@@ -409,30 +411,35 @@ def _(
     plt,
     shap_p0,
     shap_p1,
+    y_explain,
 ):
     # Numeric dependence: p-values — one 2×2 per class, side-by-side
-    _color_pairs_pv = {
-        numeric_cols[0]: numeric_cols[1],
-        numeric_cols[1]: numeric_cols[0],
-        numeric_cols[2]: numeric_cols[3],
-        numeric_cols[3]: numeric_cols[2],
-    }
+    _class_colors_pv = {0: "#e74c3c", 1: "#2ecc71"}
 
     fig_dep_pv_num, _axes_pv = plt.subplots(4, 2, figsize=(12, 18))
     for _i, _col in enumerate(numeric_cols):
-        _color_col = _color_pairs_pv[_col]
         for _k, (_shap_pk, _label) in enumerate([(shap_p0, "P-val class 0"), (shap_p1, "P-val class 1")]):
             _ax = _axes_pv[_i, _k]
-            _sc = _ax.scatter(
-                X_explain_df[_col].values, _shap_pk[:, _i],
-                c=X_explain_df[_color_col].values,
-                cmap="coolwarm", alpha=0.6, s=20,
-            )
+            _x_vals = X_explain_df[_col].values
+            _y_vals = _shap_pk[:, _i]
+            _ax.scatter(_x_vals, _y_vals, color="steelblue", alpha=0.5, s=20, edgecolors="white", linewidths=0.3)
             _ax.axhline(0, color="gray", lw=0.8, linestyle="--")
+            # Global OLS line
+            _x_range = np.linspace(_x_vals.min(), _x_vals.max(), 200)
+            _coeffs = np.polyfit(_x_vals, _y_vals, 1)
+            _ax.plot(_x_range, np.polyval(_coeffs, _x_range), color="black", lw=2, label="Global OLS", zorder=5)
+            # Per-class OLS lines
+            for _cls, _cls_color in _class_colors_pv.items():
+                _cls_mask = y_explain == _cls
+                if _cls_mask.sum() > 1:
+                    _cx, _cy = _x_vals[_cls_mask], _y_vals[_cls_mask]
+                    _c_coeffs = np.polyfit(_cx, _cy, 1)
+                    _cx_range = np.linspace(_cx.min(), _cx.max(), 200)
+                    _ax.plot(_cx_range, np.polyval(_c_coeffs, _cx_range), color=_cls_color, lw=1.8, linestyle="--", label=f"Class {_cls}", zorder=5)
+            _ax.legend(fontsize=7, loc="best")
             _ax.set_xlabel(_col)
             _ax.set_ylabel(f"SHAP({_label}) — {_col}")
-            _ax.set_title(f"{_col} vs {_label}  [color={_color_col}]")
-            plt.colorbar(_sc, ax=_ax, fraction=0.04)
+            _ax.set_title(f"{_col} vs {_label}")
     plt.suptitle("SHAP(P-values) Dependence — Numeric Features", fontsize=12, y=1.01)
     plt.tight_layout()
 
@@ -474,30 +481,35 @@ def _(
     plt,
     shap_confidence,
     shap_credibility,
+    y_explain,
 ):
-    _color_pairs_cc = {
-        numeric_cols[0]: numeric_cols[1],
-        numeric_cols[1]: numeric_cols[0],
-        numeric_cols[2]: numeric_cols[3],
-        numeric_cols[3]: numeric_cols[2],
-    }
+    _class_colors_cc = {0: "#e74c3c", 1: "#2ecc71"}
 
     # Numeric dependence: confidence & credibility — 4 features × 2 metrics
     fig_dep_cc_num, _axes_cc = plt.subplots(4, 2, figsize=(12, 18))
     for _i, _col in enumerate(numeric_cols):
-        _color_col = _color_pairs_cc[_col]
         for _k, (_shap_cc, _label) in enumerate([(shap_confidence, "Confidence"), (shap_credibility, "Credibility")]):
             _ax = _axes_cc[_i, _k]
-            _sc = _ax.scatter(
-                X_explain_df[_col].values, _shap_cc[:, _i],
-                c=X_explain_df[_color_col].values,
-                cmap="coolwarm", alpha=0.6, s=20,
-            )
+            _x_vals = X_explain_df[_col].values
+            _y_vals = _shap_cc[:, _i]
+            _ax.scatter(_x_vals, _y_vals, color="steelblue", alpha=0.5, s=20, edgecolors="white", linewidths=0.3)
             _ax.axhline(0, color="gray", lw=0.8, linestyle="--")
+            # Global OLS line
+            _x_range = np.linspace(_x_vals.min(), _x_vals.max(), 200)
+            _coeffs = np.polyfit(_x_vals, _y_vals, 1)
+            _ax.plot(_x_range, np.polyval(_coeffs, _x_range), color="black", lw=2, label="Global OLS", zorder=5)
+            # Per-class OLS lines
+            for _cls, _cls_color in _class_colors_cc.items():
+                _cls_mask = y_explain == _cls
+                if _cls_mask.sum() > 1:
+                    _cx, _cy = _x_vals[_cls_mask], _y_vals[_cls_mask]
+                    _c_coeffs = np.polyfit(_cx, _cy, 1)
+                    _cx_range = np.linspace(_cx.min(), _cx.max(), 200)
+                    _ax.plot(_cx_range, np.polyval(_c_coeffs, _cx_range), color=_cls_color, lw=1.8, linestyle="--", label=f"Class {_cls}", zorder=5)
+            _ax.legend(fontsize=7, loc="best")
             _ax.set_xlabel(_col)
             _ax.set_ylabel(f"SHAP({_label}) — {_col}")
-            _ax.set_title(f"{_col} vs {_label}  [color={_color_col}]")
-            plt.colorbar(_sc, ax=_ax, fraction=0.04)
+            _ax.set_title(f"{_col} vs {_label}")
     plt.suptitle("SHAP(Confidence & Credibility) Dependence — Numeric Features", fontsize=12, y=1.01)
     plt.tight_layout()
 
