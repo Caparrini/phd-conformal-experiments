@@ -345,8 +345,9 @@ def build_context(
             fcod_artifacts[artifact_key] = download_artifact_b64(run_id, artifact_name)
 
         all_paths = list_artifacts_flat(client, run_id)
+        _skip_prefixes = ("by_class/", "by_class_stacked/", "merged/", "fcod_stacked_density/")
         for path in all_paths:
-            if path.startswith("by_class/") or path.startswith("by_class_stacked/"):
+            if any(path.startswith(p) for p in _skip_prefixes):
                 continue  # handled separately below
             filename = Path(path).name
             if filename.endswith(".png"):
@@ -383,9 +384,54 @@ def build_context(
         for path in stacked_paths:
             feat_name = Path(path).stem
             fcod_artifacts_by_class_stacked[feat_name] = download_artifact_b64(run_id, path)
+
+        # Collect merged/ top-level artifacts (excluding merged/by_class/)
+        fcod_artifacts_merged: dict[str, str | None] = {}
+        merged_top_paths = sorted(
+            p for p in all_paths
+            if p.startswith("merged/") and not p.startswith("merged/by_class/") and p.endswith(".png")
+        )
+        for path in merged_top_paths:
+            filename = Path(path).name
+            art_key = filename.replace(".png", "")
+            if art_key not in fcod_artifacts_merged:
+                fcod_artifacts_merged[art_key] = download_artifact_b64(run_id, path)
+
+        # Collect merged per-class artifacts
+        fcod_artifacts_merged_by_class: dict[str, dict[str, str | None]] = {}
+        merged_class_dirs = sorted({
+            "/".join(p.split("/")[:3])
+            for p in all_paths
+            if p.startswith("merged/by_class/")
+        })
+        for class_dir in merged_class_dirs:
+            class_label = class_dir.split("/")[2]  # e.g. "class_0"
+            class_arts_m: dict[str, str | None] = {}
+            class_paths_m = [p for p in all_paths if p.startswith(class_dir + "/")]
+            for path in class_paths_m:
+                filename = Path(path).name
+                if filename.endswith(".png"):
+                    art_key = filename.replace(".png", "")
+                    if art_key not in class_arts_m:
+                        class_arts_m[art_key] = download_artifact_b64(run_id, path)
+            if class_arts_m:
+                fcod_artifacts_merged_by_class[class_label] = class_arts_m
+
+        # Collect per-feature stacked + density artifacts
+        fcod_artifacts_stacked_density: dict[str, str | None] = {}
+        sd_paths = sorted(
+            p for p in all_paths
+            if p.startswith("fcod_stacked_density/") and p.endswith(".png")
+        )
+        for path in sd_paths:
+            feat_name = Path(path).stem
+            fcod_artifacts_stacked_density[feat_name] = download_artifact_b64(run_id, path)
     else:
         fcod_artifacts_by_class = {}
         fcod_artifacts_by_class_stacked = {}
+        fcod_artifacts_merged = {}
+        fcod_artifacts_merged_by_class = {}
+        fcod_artifacts_stacked_density = {}
 
     # ── Stage 06: SHAP ───────────────────────────────────────────────────────
     print(f"  SHAP run: {RUN_NAMES['shap']}")
@@ -409,6 +455,9 @@ def build_context(
         "fcod_artifacts":  fcod_artifacts,
         "fcod_artifacts_by_class": fcod_artifacts_by_class,
         "fcod_artifacts_by_class_stacked": fcod_artifacts_by_class_stacked,
+        "fcod_artifacts_merged": fcod_artifacts_merged,
+        "fcod_artifacts_merged_by_class": fcod_artifacts_merged_by_class,
+        "fcod_artifacts_stacked_density": fcod_artifacts_stacked_density,
         "shap_artifacts":  shap_artifacts,
     }
 

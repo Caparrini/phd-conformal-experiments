@@ -230,6 +230,9 @@
     <li><a href="#model">Model Performance</a></li>
     <li><a href="#conformal">Conformal Evaluation</a></li>
     <li><a href="#fcod">FCOD Analysis</a></li>
+    <li><a href="#fcod-merged">Merged Outcomes</a></li>
+    <li><a href="#fcod-density">Stacked + Density</a></li>
+    <li><a href="#fcod-merged-class-section">Merged Per-Class</a></li>
     <li><a href="#shap">SHAP Explainability</a></li>
   </ul>
 </div>
@@ -238,6 +241,9 @@
   <a href="#model">↓ Model</a>
   <a href="#conformal">↓ Conformal</a>
   <a href="#fcod">↓ FCOD</a>
+  <a href="#fcod-merged">↓ Merged</a>
+  <a href="#fcod-density">↓ Density</a>
+  <a href="#fcod-merged-class-section">↓ Merged/Class</a>
   <a href="#shap">↓ SHAP</a>
 </nav>
 
@@ -638,6 +644,121 @@
 </div>{# /figures #}
 {% endfor %}
 {% endif %}{# end if fcod_artifacts_by_class #}
+
+{# ── Merged Uncertain Outcomes ────────────────────────────────────────────── #}
+{% if fcod_artifacts_merged %}
+<h3 id="fcod-merged">Merged Uncertain Outcomes</h3>
+<div class="figures">
+
+  {% if fcod_artifacts_merged['fcod_with_ci'] is defined and fcod_artifacts_merged['fcod_with_ci'] %}
+  <div class="figure-block">
+    <img src="data:image/png;base64,{{ fcod_artifacts_merged['fcod_with_ci'] }}"
+         alt="Merged FCOD by feature with 95% bootstrap CI">
+    <p class="caption">Merged outcome FCODs by feature (with 95% bootstrap CI)</p>
+  </div>
+  {% endif %}
+
+  {% if fcod_artifacts_merged['fcod_stacked'] is defined and fcod_artifacts_merged['fcod_stacked'] %}
+  <div class="figure-block">
+    <img src="data:image/png;base64,{{ fcod_artifacts_merged['fcod_stacked'] }}"
+         alt="Merged stacked outcome distribution by feature">
+    <p class="caption">Merged stacked outcome distribution by feature</p>
+  </div>
+  {% endif %}
+
+  {% set merged_shown = ['fcod_with_ci', 'fcod_stacked'] %}
+  {% set merged_extras = [] %}
+  {% for art_key, b64 in fcod_artifacts_merged.items() %}
+    {% if art_key not in merged_shown and b64 %}
+      {% set _ = merged_extras.append((art_key, b64)) %}
+    {% endif %}
+  {% endfor %}
+  {% if merged_extras | length > 1 %}
+  <div class="figure-grid figure-grid-2">
+    {% for art_key, b64 in merged_extras %}
+    <div class="figure-block">
+      <img src="data:image/png;base64,{{ b64 }}" alt="{{ art_key }}">
+      <p class="caption">{{ art_key.replace('_', ' ').title() }}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% elif merged_extras | length == 1 %}
+  <div class="figure-block">
+    <img src="data:image/png;base64,{{ merged_extras[0][1] }}" alt="{{ merged_extras[0][0] }}">
+    <p class="caption">{{ merged_extras[0][0].replace('_', ' ').title() }}</p>
+  </div>
+  {% endif %}
+
+</div>{# /figures #}
+{% endif %}{# end if fcod_artifacts_merged #}
+
+{# ── Stacked Outcome Distribution with Feature Density ────────────────────── #}
+{% if fcod_artifacts_stacked_density %}
+<h3 id="fcod-density">Stacked Outcome Distribution with Feature Density</h3>
+<div class="figures">
+  <div class="figure-grid figure-grid-2">
+    {% for feat_name, b64 in fcod_artifacts_stacked_density.items() %}
+    {% if b64 %}
+    <div class="figure-block">
+      <img src="data:image/png;base64,{{ b64 }}"
+           alt="Stacked FCOD with density — {{ feat_name }}">
+      <p class="caption">{{ feat_name.replace('_', ' ').title() }}</p>
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+</div>
+{% endif %}{# end if fcod_artifacts_stacked_density #}
+
+{# ── Merged per-class FCOD ────────────────────────────────────────────────── #}
+{% if fcod_artifacts_merged_by_class %}
+<span id="fcod-merged-class-section"></span>
+{% for class_label, class_arts_m in fcod_artifacts_merged_by_class.items() %}
+<h3 id="fcod-merged-class-{{ class_label }}">Merged FCOD — {{ class_label.replace('_', ' ').title() }}</h3>
+<div class="figures">
+
+  {% if 'fcod_with_ci' in class_arts_m and class_arts_m['fcod_with_ci'] %}
+  <div class="figure-block">
+    <img src="data:image/png;base64,{{ class_arts_m['fcod_with_ci'] }}"
+         alt="Merged FCOD by feature with 95% bootstrap CI — {{ class_label }}">
+    <p class="caption">Merged outcome FCODs by feature (with 95% bootstrap CI) — {{ class_label.replace('_', ' ').title() }}</p>
+  </div>
+  {% endif %}
+
+  {% if 'fcod_stacked' in class_arts_m and class_arts_m['fcod_stacked'] %}
+  <div class="figure-block">
+    <img src="data:image/png;base64,{{ class_arts_m['fcod_stacked'] }}"
+         alt="Merged stacked outcome distribution — {{ class_label }}">
+    <p class="caption">Merged stacked outcome distribution — {{ class_label.replace('_', ' ').title() }}</p>
+  </div>
+  {% endif %}
+
+  {% set mcls_shown = ['fcod_with_ci', 'fcod_stacked'] %}
+  {% set mcls_extras = [] %}
+  {% for art_key, b64 in class_arts_m.items() %}
+    {% if art_key not in mcls_shown and b64 %}
+      {% set _ = mcls_extras.append((art_key, b64)) %}
+    {% endif %}
+  {% endfor %}
+  {% if mcls_extras | length > 1 %}
+  <div class="figure-grid figure-grid-2">
+    {% for art_key, b64 in mcls_extras %}
+    <div class="figure-block">
+      <img src="data:image/png;base64,{{ b64 }}" alt="{{ art_key }}">
+      <p class="caption">{{ art_key.replace('_', ' ').title() }}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% elif mcls_extras | length == 1 %}
+  <div class="figure-block">
+    <img src="data:image/png;base64,{{ mcls_extras[0][1] }}" alt="{{ mcls_extras[0][0] }}">
+    <p class="caption">{{ mcls_extras[0][0].replace('_', ' ').title() }}</p>
+  </div>
+  {% endif %}
+
+</div>{# /figures #}
+{% endfor %}
+{% endif %}{# end if fcod_artifacts_merged_by_class #}
 </section>
 
 <hr class="section-divider">
