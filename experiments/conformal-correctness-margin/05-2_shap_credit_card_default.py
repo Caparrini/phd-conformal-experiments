@@ -65,11 +65,11 @@ def _(cfg, mlflow, mo):
         order_by=["start_time DESC"],
         max_results=1,
     )
-    _run_id = _runs.iloc[0].run_id
-    pipeline = mlflow.sklearn.load_model(f"runs:/{_run_id}/model")
+    model_run_id = _runs.iloc[0].run_id
+    pipeline = mlflow.sklearn.load_model(f"runs:/{model_run_id}/model")
 
-    mo.md(f"Loaded model from run `{_run_id[:8]}` (`{cfg.experiment.run_name}`)")
-    return (pipeline,)
+    mo.md(f"Loaded model from run `{model_run_id[:8]}` (`{cfg.experiment.run_name}`)")
+    return model_run_id, pipeline
 
 
 @app.cell
@@ -144,12 +144,17 @@ def _(X_test, cfg, conf_clf, mo, np, pd, y_test):
 
 
 @app.cell
-def _(X_background, X_explain, full_pvalue_func, mo, np, shap):
-    kernel_explainer = shap.KernelExplainer(full_pvalue_func, X_background)
-    shap_kernel = np.array(kernel_explainer.shap_values(X_explain, nsamples=500))
+def _(EXPERIMENT_DIR, X_background, X_explain, full_pvalue_func, mo, model_run_id):
+    from dslib.shap_cache import compute_or_load_shap
+
+    shap_kernel = compute_or_load_shap(
+        full_pvalue_func, X_background, X_explain,
+        nsamples=500, model_id=model_run_id,
+        cache_dir=EXPERIMENT_DIR / "cache",
+    )
     # shape: (n_samples, n_features, n_classes)
     mo.md(f"KernelSHAP complete. Array shape: `{shap_kernel.shape}`")
-    return kernel_explainer, shap_kernel
+    return (shap_kernel,)
 
 
 @app.cell
@@ -261,61 +266,42 @@ def _(
     _top_cat_cols = [categorical_cols[j] for j in _top_cat_local]
     _top_cat_glob_idx = [_cat_start + j for j in _top_cat_local]
 
-    # Numeric 2×2 dependence (top-4)
-    fig_dep_margin_num, _axes_num = plt.subplots(2, 2, figsize=(12, 8), squeeze=False)
-    _class_colors = {0: "#e74c3c", 1: "#2ecc71"}
-    for _i, _col in enumerate(_top_num_cols):
-        _ax = _axes_num[_i // 2, _i % 2]
-        _col_i = numeric_cols.index(_col)
-        _x_vals = X_explain_df[_col].values
-        _y_vals = shap_margin[:, _col_i]
-        _ax.scatter(_x_vals, _y_vals, color="steelblue", alpha=0.5, s=20, edgecolors="white", linewidths=0.3)
-        _ax.axhline(0, color="gray", lw=0.8, linestyle="--")
-        # Global OLS line
-        _x_range = np.linspace(_x_vals.min(), _x_vals.max(), 200)
-        _coeffs = np.polyfit(_x_vals, _y_vals, 1)
-        _ax.plot(_x_range, np.polyval(_coeffs, _x_range), color="black", lw=2, label="Global OLS", zorder=5)
-        # Per-class OLS lines
-        for _cls, _cls_color in _class_colors.items():
-            _cls_mask = y_explain == _cls
-            if _cls_mask.sum() > 1:
-                _cx, _cy = _x_vals[_cls_mask], _y_vals[_cls_mask]
-                _c_coeffs = np.polyfit(_cx, _cy, 1)
-                _cx_range = np.linspace(_cx.min(), _cx.max(), 200)
-                _ax.plot(_cx_range, np.polyval(_c_coeffs, _cx_range), color=_cls_color, lw=1.8, linestyle="--", label=f"Class {_cls}", zorder=5)
-        _ax.legend(fontsize=7, loc="best")
-        _ax.set_xlabel(_col)
-        _ax.set_ylabel(f"SHAP(margin) — {_col}")
-        _ax.set_title(_col)
-    plt.suptitle("SHAP(Margin) Dependence — Top-4 Numeric Features", fontsize=12, y=1.01)
-    plt.tight_layout()
-
-    # Categorical grid (squeeze=False ensures 2D array)
-    _n_top_c = len(_top_cat_cols)
-    _cat_nrows = max(1, (_n_top_c + 1) // 2)
-    _cat_ncols = min(2, _n_top_c)
-    fig_dep_margin_cat, _axes_cat = plt.subplots(
-        _cat_nrows, _cat_ncols, figsize=(7 * _cat_ncols, 4.5 * _cat_nrows), squeeze=False
+    from conformalpy.shap import (
+        make_dependence_grid,
+        plot_shap_dependence_categorical,
+        plot_shap_dependence_numeric,
     )
-    _axes_flat = _axes_cat.flatten()
+
+    # Numeric 2×2 dependence (top-4)
+    fig_dep_margin_num, _axes_pairs_num = make_dependence_grid(len(_top_num_cols), ncols=2, figsize=(12, 10))
+    for _i, _col in enumerate(_top_num_cols):
+        _scatter_ax, _prop_ax = _axes_pairs_num[_i]
+        _col_i = numeric_cols.index(_col)
+        plot_shap_dependence_numeric(
+            _scatter_ax, X_explain_df[_col].values, shap_margin[:, _col_i],
+            y_explain, _col, shap_label="margin", proportion_ax=_prop_ax,
+        )
+    fig_dep_margin_num.suptitle("SHAP(Margin) Dependence — Top-4 Numeric Features", fontsize=12)
+    fig_dep_margin_num.tight_layout()
+
+    # Categorical grid (dynamic size)
+    _n_top_c = len(_top_cat_cols)
+    _cat_ncols = min(2, _n_top_c)
+    _cat_nrows = max(1, (_n_top_c + 1) // 2)
+    fig_dep_margin_cat, _axes_pairs_cat = make_dependence_grid(
+        _n_top_c, ncols=_cat_ncols, figsize=(7 * _cat_ncols, 5 * _cat_nrows)
+    )
     for _jj, (_col, _feat_g) in enumerate(zip(_top_cat_cols, _top_cat_glob_idx)):
-        _ax = _axes_flat[_jj]
+        _scatter_ax, _prop_ax = _axes_pairs_cat[_jj]
         _n_cats = len(cat_categories[_col])
+        _unique_labels = [int_to_cat[_col][c] for c in range(_n_cats)]
         _int_codes = X_explain_df[_col].values.astype(int)
-        _unique_codes = np.arange(_n_cats)
-        _unique_labels = [int_to_cat[_col][c] for c in _unique_codes]
-        _jitter = np.random.default_rng(42).uniform(-0.2, 0.2, size=len(_int_codes))
-        _ax.scatter(_int_codes + _jitter, shap_margin[:, _feat_g], alpha=0.5, s=15, color="steelblue")
-        _ax.axhline(0, color="gray", lw=0.8, linestyle="--")
-        _ax.set_xticks(_unique_codes)
-        _ax.set_xticklabels(_unique_labels, rotation=45, ha="right", fontsize=7)
-        _ax.set_xlabel(_col)
-        _ax.set_ylabel(f"SHAP(margin) — {_col}")
-        _ax.set_title(_col)
-    for _jj in range(_n_top_c, _cat_nrows * _cat_ncols):
-        _axes_flat[_jj].set_visible(False)
-    plt.suptitle("SHAP(Margin) Dependence — Top Categorical Features", fontsize=12, y=1.01)
-    plt.tight_layout()
+        plot_shap_dependence_categorical(
+            _scatter_ax, _int_codes, shap_margin[:, _feat_g],
+            y_explain, _unique_labels, _col, shap_label="margin", proportion_ax=_prop_ax,
+        )
+    fig_dep_margin_cat.suptitle("SHAP(Margin) Dependence — Top Categorical Features", fontsize=12)
+    fig_dep_margin_cat.tight_layout()
 
     mo.md("Dependence plots (margin) generated.")
     return fig_dep_margin_cat, fig_dep_margin_num

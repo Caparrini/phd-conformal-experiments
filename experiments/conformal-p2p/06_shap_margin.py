@@ -24,11 +24,11 @@ def _():
         cfg = compose(config_name="config")
 
     mo.md("""
-# SHAP Margin Analysis — Conformal P2P Lending
+    # SHAP Margin Analysis — Conformal P2P Lending
 
-Full SHAP explainability experiment on the conformal P2P lending model.
-All 8 features (4 numeric + 4 categorical) included via integer encoding.
-Results logged to MLflow.
+    Full SHAP explainability experiment on the conformal P2P lending model.
+    All 8 features (4 numeric + 4 categorical) included via integer encoding.
+    Results logged to MLflow.
     """)
     return EXPERIMENT_DIR, OmegaConf, cfg, mlflow, mo, np, pd, plt, shap, sns
 
@@ -67,7 +67,7 @@ def _(cfg, mlflow, mo):
     model_id = models.iloc[0].model_id
     pipeline = mlflow.sklearn.load_model(f"models:/{model_id}")
     mo.md(f"Loaded model `{model_id[:8]}` from experiment `{cfg.experiment.name}`")
-    return pipeline,
+    return model_id, pipeline
 
 
 @app.cell
@@ -85,7 +85,7 @@ def _(X_cal, cfg, mo, pipeline, y_cal):
     )
     conf_clf.calibrate(X_cal, y_cal)
     mo.md(f"ConformalClassifier calibrated: α={alpha}, Mondrian=True, n_cal={len(X_cal):,}")
-    return alpha, conf_clf
+    return (conf_clf,)
 
 
 @app.cell
@@ -101,9 +101,9 @@ def _(X_test, cfg, conf_clf, mo, np, pd, y_test):
 
     np.random.seed(cfg.experiment.seed)
     n_test = len(X_test)
-    background_idx = np.random.choice(n_test, size=50, replace=False)
+    background_idx = np.random.choice(n_test, size=1000, replace=False)
     explain_idx = np.random.choice(
-        np.setdiff1d(np.arange(n_test), background_idx), size=100, replace=False
+        np.setdiff1d(np.arange(n_test), background_idx), size=2000, replace=False
     )
     y_explain = y_test.values[explain_idx]
     n_explain = len(explain_idx)
@@ -135,11 +135,11 @@ def _(X_test, cfg, conf_clf, mo, np, pd, y_test):
     X_explain_df = pd.DataFrame(X_explain, columns=all_cols)
 
     mo.md(f"""
-**SHAP Setup Complete**
+    **SHAP Setup Complete**
 
-- Background samples: {len(X_background)} | Explain samples: {n_explain}
-- Features: {len(all_cols)} total ({len(numeric_cols)} numeric, {len(categorical_cols)} categorical)
-- Categorical encoding: integer codes, decoded before each pipeline call
+    - Background samples: {len(X_background)} | Explain samples: {n_explain}
+    - Features: {len(all_cols)} total ({len(numeric_cols)} numeric, {len(categorical_cols)} categorical)
+    - Categorical encoding: integer codes, decoded before each pipeline call
     """)
     return (
         X_background,
@@ -147,25 +147,27 @@ def _(X_test, cfg, conf_clf, mo, np, pd, y_test):
         X_explain_df,
         all_cols,
         cat_categories,
-        cat_to_int,
         categorical_cols,
         full_pvalue_func,
         int_to_cat,
         n_explain,
-        n_num,
         numeric_cols,
         y_explain,
     )
 
 
 @app.cell
-def _(X_background, X_explain, full_pvalue_func, mo, np, shap):
-    kernel_explainer = shap.KernelExplainer(full_pvalue_func, X_background)
-    shap_kernel = kernel_explainer.shap_values(X_explain, nsamples=500)
-    # SHAP 0.51: multi-output returns (n_samples, n_features, n_outputs)
-    shap_kernel = np.array(shap_kernel)
+def _(EXPERIMENT_DIR, X_background, X_explain, full_pvalue_func, mo, model_id):
+    from dslib.shap_cache import compute_or_load_shap
+
+    shap_kernel = compute_or_load_shap(
+        full_pvalue_func, X_background, X_explain,
+        nsamples=10000, model_id=model_id,
+        cache_dir=EXPERIMENT_DIR / "cache",
+    )
+    # shape: (n_samples, n_features, n_outputs)
     mo.md(f"KernelSHAP complete. Array shape: `{shap_kernel.shape}`")
-    return kernel_explainer, shap_kernel
+    return (shap_kernel,)
 
 
 @app.cell
@@ -202,29 +204,17 @@ def _(
     shap_confidence = derive_confidence_shap([shap_p0, shap_p1], p_values_explain)
 
     mo.md(f"""
-**Derived SHAP targets** (all shape `(n_explain, n_features)` = `({n_explain}, {shap_p0.shape[1]})`):
+    **Derived SHAP targets** (all shape `(n_explain, n_features)` = `({n_explain}, {shap_p0.shape[1]})`):
 
-| Target | Formula | Shape |
-|--------|---------|-------|
-| `shap_p0` | SHAP of p-value class 0 | `{shap_p0.shape}` |
-| `shap_p1` | SHAP of p-value class 1 | `{shap_p1.shape}` |
-| `shap_margin` | SHAP(p_true) − SHAP(p_false) | `{shap_margin.shape}` |
-| `shap_credibility` | SHAP of argmax-p class | `{shap_credibility.shape}` |
-| `shap_confidence` | −SHAP of argmin-p class | `{shap_confidence.shape}` |
+    | Target | Formula | Shape |
+    |--------|---------|-------|
+    | `shap_p0` | SHAP of p-value class 0 | `{shap_p0.shape}` |
+    | `shap_p1` | SHAP of p-value class 1 | `{shap_p1.shape}` |
+    | `shap_margin` | SHAP(p_true) − SHAP(p_false) | `{shap_margin.shape}` |
+    | `shap_credibility` | SHAP of argmax-p class | `{shap_credibility.shape}` |
+    | `shap_confidence` | −SHAP of argmin-p class | `{shap_confidence.shape}` |
     """)
-    return (
-        credibility_class,
-        derive_confidence_shap,
-        derive_margin_shap,
-        p_values_explain,
-        shap_confidence,
-        shap_credibility,
-        shap_margin,
-        shap_p0,
-        shap_p1,
-        shap_p_false,
-        shap_p_true,
-    )
+    return shap_confidence, shap_credibility, shap_margin, shap_p0, shap_p1
 
 
 @app.cell
@@ -260,7 +250,7 @@ def _(X_explain_df, all_cols, mo, plt, shap, shap_p0, shap_p1, y_explain):
         )
 
     mo.md(f"Beeswarm p-values: {len(figs_beeswarm_pv)} figures generated.")
-    return figs_beeswarm_pv,
+    return (figs_beeswarm_pv,)
 
 
 @app.cell
@@ -326,7 +316,7 @@ def _(
         )
 
     mo.md(f"Beeswarm derived metrics: {len(figs_beeswarm_derived)} figures generated.")
-    return figs_beeswarm_derived,
+    return (figs_beeswarm_derived,)
 
 
 @app.cell
@@ -336,67 +326,49 @@ def _(
     categorical_cols,
     int_to_cat,
     mo,
-    np,
     numeric_cols,
-    plt,
     shap_margin,
     y_explain,
 ):
+    from conformalpy.shap import (
+        make_dependence_grid,
+        plot_shap_dependence_categorical,
+        plot_shap_dependence_numeric,
+    )
+
     # Numeric dependence plots — 2×2 grid, each numeric feature vs SHAP(margin)
-    fig_dep_margin_num, _axes_num = plt.subplots(2, 2, figsize=(12, 8))
-    _class_colors_m = {0: "#e74c3c", 1: "#2ecc71"}
+    fig_dep_margin_num, _axes_pairs_num = make_dependence_grid(len(numeric_cols), ncols=2, figsize=(12, 10))
     for _i, _col in enumerate(numeric_cols):
-        _ax = _axes_num[_i // 2, _i % 2]
-        _x_vals = X_explain_df[_col].values
-        _y_vals = shap_margin[:, _i]
-        _ax.scatter(_x_vals, _y_vals, color="steelblue", alpha=0.5, s=20, edgecolors="white", linewidths=0.3)
-        _ax.axhline(0, color="gray", lw=0.8, linestyle="--")
-        # Global OLS line
-        _x_range = np.linspace(_x_vals.min(), _x_vals.max(), 200)
-        _coeffs = np.polyfit(_x_vals, _y_vals, 1)
-        _ax.plot(_x_range, np.polyval(_coeffs, _x_range), color="black", lw=2, label="Global OLS", zorder=5)
-        # Per-class OLS lines
-        for _cls, _cls_color in _class_colors_m.items():
-            _cls_mask = y_explain == _cls
-            if _cls_mask.sum() > 1:
-                _cx, _cy = _x_vals[_cls_mask], _y_vals[_cls_mask]
-                _c_coeffs = np.polyfit(_cx, _cy, 1)
-                _cx_range = np.linspace(_cx.min(), _cx.max(), 200)
-                _ax.plot(_cx_range, np.polyval(_c_coeffs, _cx_range), color=_cls_color, lw=1.8, linestyle="--", label=f"Class {_cls}", zorder=5)
-        _ax.legend(fontsize=7, loc="best")
-        _ax.set_xlabel(_col)
-        _ax.set_ylabel(f"SHAP(margin) — {_col}")
-        _ax.set_title(_col)
-    plt.suptitle("SHAP(Margin) Dependence — Numeric Features", fontsize=12, y=1.01)
-    plt.tight_layout()
-
-    # Categorical dependence plots — box/strip per category, decoded labels
-    fig_dep_margin_cat, _axes_cat = plt.subplots(2, 2, figsize=(14, 9))
-    for _j, _col in enumerate(categorical_cols):
-        _ax = _axes_cat[_j // 2, _j % 2]
-        _n_cats = len(cat_categories[_col])
-        _int_codes = X_explain_df[_col].values.astype(int)
-        _labels = [int_to_cat[_col][int(c)] for c in _int_codes]
-        _unique_codes = np.arange(_n_cats)
-        _unique_labels = [int_to_cat[_col][c] for c in _unique_codes]
-
-        # Jittered strip plot
-        _jitter = np.random.default_rng(42).uniform(-0.2, 0.2, size=len(_int_codes))
-        _sc2 = _ax.scatter(
-            _int_codes + _jitter, shap_margin[:, len(numeric_cols) + _j],
-            alpha=0.5, s=15, color="steelblue",
+        _scatter_ax, _prop_ax = _axes_pairs_num[_i]
+        plot_shap_dependence_numeric(
+            _scatter_ax, X_explain_df[_col].values, shap_margin[:, _i],
+            y_explain, _col, shap_label="margin", proportion_ax=_prop_ax,
         )
-        _ax.axhline(0, color="gray", lw=0.8, linestyle="--")
-        _ax.set_xticks(_unique_codes)
-        _ax.set_xticklabels(_unique_labels, rotation=45, ha="right", fontsize=7)
-        _ax.set_xlabel(_col)
-        _ax.set_ylabel(f"SHAP(margin) — {_col}")
-        _ax.set_title(f"{_col}")
-    plt.suptitle("SHAP(Margin) Dependence — Categorical Features", fontsize=12, y=1.01)
-    plt.tight_layout()
+    fig_dep_margin_num.suptitle("SHAP(Margin) Dependence — Numeric Features", fontsize=12)
+    fig_dep_margin_num.tight_layout()
+
+    # Categorical dependence plots — jittered strip per category, decoded labels
+    fig_dep_margin_cat, _axes_pairs_cat = make_dependence_grid(len(categorical_cols), ncols=2, figsize=(14, 10))
+    for _j, _col in enumerate(categorical_cols):
+        _scatter_ax, _prop_ax = _axes_pairs_cat[_j]
+        _n_cats = len(cat_categories[_col])
+        _unique_labels = [int_to_cat[_col][c] for c in range(_n_cats)]
+        _int_codes = X_explain_df[_col].values.astype(int)
+        plot_shap_dependence_categorical(
+            _scatter_ax, _int_codes, shap_margin[:, len(numeric_cols) + _j],
+            y_explain, _unique_labels, _col, shap_label="margin", proportion_ax=_prop_ax,
+        )
+    fig_dep_margin_cat.suptitle("SHAP(Margin) Dependence — Categorical Features", fontsize=12)
+    fig_dep_margin_cat.tight_layout()
 
     mo.md("Dependence plots (margin) generated.")
-    return fig_dep_margin_cat, fig_dep_margin_num
+    return (
+        fig_dep_margin_cat,
+        fig_dep_margin_num,
+        make_dependence_grid,
+        plot_shap_dependence_categorical,
+        plot_shap_dependence_numeric,
+    )
 
 
 @app.cell
@@ -405,65 +377,42 @@ def _(
     cat_categories,
     categorical_cols,
     int_to_cat,
+    make_dependence_grid,
     mo,
-    np,
     numeric_cols,
-    plt,
+    plot_shap_dependence_categorical,
+    plot_shap_dependence_numeric,
     shap_p0,
     shap_p1,
     y_explain,
 ):
-    # Numeric dependence: p-values — one 2×2 per class, side-by-side
-    _class_colors_pv = {0: "#e74c3c", 1: "#2ecc71"}
-
-    fig_dep_pv_num, _axes_pv = plt.subplots(4, 2, figsize=(12, 18))
+    # Numeric dependence: p-values — 4×2 grid (features × {p0, p1})
+    fig_dep_pv_num, _axes_pairs_pv = make_dependence_grid(len(numeric_cols) * 2, ncols=2, figsize=(12, 22))
     for _i, _col in enumerate(numeric_cols):
         for _k, (_shap_pk, _label) in enumerate([(shap_p0, "P-val class 0"), (shap_p1, "P-val class 1")]):
-            _ax = _axes_pv[_i, _k]
-            _x_vals = X_explain_df[_col].values
-            _y_vals = _shap_pk[:, _i]
-            _ax.scatter(_x_vals, _y_vals, color="steelblue", alpha=0.5, s=20, edgecolors="white", linewidths=0.3)
-            _ax.axhline(0, color="gray", lw=0.8, linestyle="--")
-            # Global OLS line
-            _x_range = np.linspace(_x_vals.min(), _x_vals.max(), 200)
-            _coeffs = np.polyfit(_x_vals, _y_vals, 1)
-            _ax.plot(_x_range, np.polyval(_coeffs, _x_range), color="black", lw=2, label="Global OLS", zorder=5)
-            # Per-class OLS lines
-            for _cls, _cls_color in _class_colors_pv.items():
-                _cls_mask = y_explain == _cls
-                if _cls_mask.sum() > 1:
-                    _cx, _cy = _x_vals[_cls_mask], _y_vals[_cls_mask]
-                    _c_coeffs = np.polyfit(_cx, _cy, 1)
-                    _cx_range = np.linspace(_cx.min(), _cx.max(), 200)
-                    _ax.plot(_cx_range, np.polyval(_c_coeffs, _cx_range), color=_cls_color, lw=1.8, linestyle="--", label=f"Class {_cls}", zorder=5)
-            _ax.legend(fontsize=7, loc="best")
-            _ax.set_xlabel(_col)
-            _ax.set_ylabel(f"SHAP({_label}) — {_col}")
-            _ax.set_title(f"{_col} vs {_label}")
-    plt.suptitle("SHAP(P-values) Dependence — Numeric Features", fontsize=12, y=1.01)
-    plt.tight_layout()
+            _scatter_ax, _prop_ax = _axes_pairs_pv[_i * 2 + _k]
+            plot_shap_dependence_numeric(
+                _scatter_ax, X_explain_df[_col].values, _shap_pk[:, _i],
+                y_explain, _col, shap_label=_label, proportion_ax=_prop_ax,
+            )
+    fig_dep_pv_num.suptitle("SHAP(P-values) Dependence — Numeric Features", fontsize=12)
+    fig_dep_pv_num.tight_layout()
 
-    # Categorical dependence: p-values
-    fig_dep_pv_cat, _axes_pv_cat = plt.subplots(4, 2, figsize=(14, 20))
+    # Categorical dependence: p-values — 4×2 grid (features × {p0, p1})
+    fig_dep_pv_cat, _axes_pairs_pv_cat = make_dependence_grid(len(categorical_cols) * 2, ncols=2, figsize=(14, 24))
     for _j, _col in enumerate(categorical_cols):
         _n_cats = len(cat_categories[_col])
         _int_codes = X_explain_df[_col].values.astype(int)
-        _unique_codes = np.arange(_n_cats)
-        _unique_labels = [int_to_cat[_col][c] for c in _unique_codes]
-        _jitter = np.random.default_rng(0).uniform(-0.2, 0.2, size=len(_int_codes))
-
+        _unique_labels = [int_to_cat[_col][c] for c in range(_n_cats)]
+        _feat_idx = len(numeric_cols) + _j
         for _k, (_shap_pk, _label) in enumerate([(shap_p0, "P-val class 0"), (shap_p1, "P-val class 1")]):
-            _ax = _axes_pv_cat[_j, _k]
-            _feat_idx = len(numeric_cols) + _j
-            _ax.scatter(_int_codes + _jitter, _shap_pk[:, _feat_idx], alpha=0.5, s=15, color="steelblue")
-            _ax.axhline(0, color="gray", lw=0.8, linestyle="--")
-            _ax.set_xticks(_unique_codes)
-            _ax.set_xticklabels(_unique_labels, rotation=45, ha="right", fontsize=7)
-            _ax.set_xlabel(_col)
-            _ax.set_ylabel(f"SHAP({_label}) — {_col}")
-            _ax.set_title(f"{_col} vs {_label}")
-    plt.suptitle("SHAP(P-values) Dependence — Categorical Features", fontsize=12, y=1.01)
-    plt.tight_layout()
+            _scatter_ax, _prop_ax = _axes_pairs_pv_cat[_j * 2 + _k]
+            plot_shap_dependence_categorical(
+                _scatter_ax, _int_codes, _shap_pk[:, _feat_idx],
+                y_explain, _unique_labels, _col, shap_label=_label, proportion_ax=_prop_ax,
+            )
+    fig_dep_pv_cat.suptitle("SHAP(P-values) Dependence — Categorical Features", fontsize=12)
+    fig_dep_pv_cat.tight_layout()
 
     mo.md("Dependence plots (p-values) generated.")
     return fig_dep_pv_cat, fig_dep_pv_num
@@ -475,65 +424,42 @@ def _(
     cat_categories,
     categorical_cols,
     int_to_cat,
+    make_dependence_grid,
     mo,
-    np,
     numeric_cols,
-    plt,
+    plot_shap_dependence_categorical,
+    plot_shap_dependence_numeric,
     shap_confidence,
     shap_credibility,
     y_explain,
 ):
-    _class_colors_cc = {0: "#e74c3c", 1: "#2ecc71"}
-
     # Numeric dependence: confidence & credibility — 4 features × 2 metrics
-    fig_dep_cc_num, _axes_cc = plt.subplots(4, 2, figsize=(12, 18))
+    fig_dep_cc_num, _axes_pairs_cc = make_dependence_grid(len(numeric_cols) * 2, ncols=2, figsize=(12, 22))
     for _i, _col in enumerate(numeric_cols):
         for _k, (_shap_cc, _label) in enumerate([(shap_confidence, "Confidence"), (shap_credibility, "Credibility")]):
-            _ax = _axes_cc[_i, _k]
-            _x_vals = X_explain_df[_col].values
-            _y_vals = _shap_cc[:, _i]
-            _ax.scatter(_x_vals, _y_vals, color="steelblue", alpha=0.5, s=20, edgecolors="white", linewidths=0.3)
-            _ax.axhline(0, color="gray", lw=0.8, linestyle="--")
-            # Global OLS line
-            _x_range = np.linspace(_x_vals.min(), _x_vals.max(), 200)
-            _coeffs = np.polyfit(_x_vals, _y_vals, 1)
-            _ax.plot(_x_range, np.polyval(_coeffs, _x_range), color="black", lw=2, label="Global OLS", zorder=5)
-            # Per-class OLS lines
-            for _cls, _cls_color in _class_colors_cc.items():
-                _cls_mask = y_explain == _cls
-                if _cls_mask.sum() > 1:
-                    _cx, _cy = _x_vals[_cls_mask], _y_vals[_cls_mask]
-                    _c_coeffs = np.polyfit(_cx, _cy, 1)
-                    _cx_range = np.linspace(_cx.min(), _cx.max(), 200)
-                    _ax.plot(_cx_range, np.polyval(_c_coeffs, _cx_range), color=_cls_color, lw=1.8, linestyle="--", label=f"Class {_cls}", zorder=5)
-            _ax.legend(fontsize=7, loc="best")
-            _ax.set_xlabel(_col)
-            _ax.set_ylabel(f"SHAP({_label}) — {_col}")
-            _ax.set_title(f"{_col} vs {_label}")
-    plt.suptitle("SHAP(Confidence & Credibility) Dependence — Numeric Features", fontsize=12, y=1.01)
-    plt.tight_layout()
+            _scatter_ax, _prop_ax = _axes_pairs_cc[_i * 2 + _k]
+            plot_shap_dependence_numeric(
+                _scatter_ax, X_explain_df[_col].values, _shap_cc[:, _i],
+                y_explain, _col, shap_label=_label, proportion_ax=_prop_ax,
+            )
+    fig_dep_cc_num.suptitle("SHAP(Confidence & Credibility) Dependence — Numeric Features", fontsize=12)
+    fig_dep_cc_num.tight_layout()
 
     # Categorical dependence: confidence & credibility
-    fig_dep_cc_cat, _axes_cc_cat = plt.subplots(4, 2, figsize=(14, 20))
+    fig_dep_cc_cat, _axes_pairs_cc_cat = make_dependence_grid(len(categorical_cols) * 2, ncols=2, figsize=(14, 24))
     for _j, _col in enumerate(categorical_cols):
         _n_cats = len(cat_categories[_col])
         _int_codes = X_explain_df[_col].values.astype(int)
-        _unique_codes = np.arange(_n_cats)
-        _unique_labels = [int_to_cat[_col][c] for c in _unique_codes]
-        _jitter = np.random.default_rng(1).uniform(-0.2, 0.2, size=len(_int_codes))
+        _unique_labels = [int_to_cat[_col][c] for c in range(_n_cats)]
         _feat_idx = len(numeric_cols) + _j
-
         for _k, (_shap_cc, _label) in enumerate([(shap_confidence, "Confidence"), (shap_credibility, "Credibility")]):
-            _ax = _axes_cc_cat[_j, _k]
-            _ax.scatter(_int_codes + _jitter, _shap_cc[:, _feat_idx], alpha=0.5, s=15, color="darkorange")
-            _ax.axhline(0, color="gray", lw=0.8, linestyle="--")
-            _ax.set_xticks(_unique_codes)
-            _ax.set_xticklabels(_unique_labels, rotation=45, ha="right", fontsize=7)
-            _ax.set_xlabel(_col)
-            _ax.set_ylabel(f"SHAP({_label}) — {_col}")
-            _ax.set_title(f"{_col} vs {_label}")
-    plt.suptitle("SHAP(Confidence & Credibility) Dependence — Categorical Features", fontsize=12, y=1.01)
-    plt.tight_layout()
+            _scatter_ax, _prop_ax = _axes_pairs_cc_cat[_j * 2 + _k]
+            plot_shap_dependence_categorical(
+                _scatter_ax, _int_codes, _shap_cc[:, _feat_idx],
+                y_explain, _unique_labels, _col, shap_label=_label, proportion_ax=_prop_ax,
+            )
+    fig_dep_cc_cat.suptitle("SHAP(Confidence & Credibility) Dependence — Categorical Features", fontsize=12)
+    fig_dep_cc_cat.tight_layout()
 
     mo.md("Dependence plots (confidence & credibility) generated.")
     return fig_dep_cc_cat, fig_dep_cc_num
@@ -542,7 +468,6 @@ def _(
 @app.cell
 def _(
     all_cols,
-    categorical_cols,
     mo,
     np,
     numeric_cols,
@@ -670,17 +595,17 @@ def _(
         plt.close(fig_heatmap)
 
     mo.md("""
-## MLflow Logging Complete
+    ## MLflow Logging Complete
 
-Run `shap-margin-analysis` logged to experiment `conformal-p2p`:
+    Run `shap-margin-analysis` logged to experiment `conformal-p2p`:
 
-| Artifact group | Contents |
-|---|---|
-| `shap/beeswarm/pvalues/` | 6 beeswarm figures (p0, p1 — all, class0, class1) |
-| `shap/beeswarm/derived/` | 7 beeswarm figures (margin, confidence, credibility) |
-| `shap/dependence/numeric/` | margin, p-values, confidence+credibility |
-| `shap/dependence/categorical/` | margin, p-values, confidence+credibility |
-| `shap/importance/` | bar chart + normalized heatmap |
+    | Artifact group | Contents |
+    |---|---|
+    | `shap/beeswarm/pvalues/` | 6 beeswarm figures (p0, p1 — all, class0, class1) |
+    | `shap/beeswarm/derived/` | 7 beeswarm figures (margin, confidence, credibility) |
+    | `shap/dependence/numeric/` | margin, p-values, confidence+credibility |
+    | `shap/dependence/categorical/` | margin, p-values, confidence+credibility |
+    | `shap/importance/` | bar chart + normalized heatmap |
     """)
     return
 

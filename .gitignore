@@ -27,3 +27,6 @@ CLAUDE.md
 
 # .html
 *.html
+
+# SHAP joblib cache
+**/cache/
