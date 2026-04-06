@@ -530,6 +530,40 @@ def _(
 
 
 @app.cell
+def _(all_cols, mo, plt, shap_confidence, shap_credibility, shap_margin, shap_p0, shap_p1, y_explain):
+    from conformalpy.shap import plot_signed_importance_by_class, plot_signed_importance_heatmap
+
+    _class_names = {0: "approved", 1: "default"}
+
+    _targets = {
+        "pval_0": shap_p0,
+        "pval_1": shap_p1,
+        "margin": shap_margin,
+        "confidence": shap_confidence,
+        "credibility": shap_credibility,
+    }
+
+    figs_signed_importance = {}
+    for _name, _shap_vals in _targets.items():
+        figs_signed_importance[_name] = plot_signed_importance_by_class(
+            _shap_vals, y_explain, all_cols,
+            class_names=_class_names,
+            title=f"Signed SHAP Importance — {_name}",
+        )
+
+    figs_heatmap_per_class = {}
+    for _name, _shap_vals in _targets.items():
+        figs_heatmap_per_class[_name] = plot_signed_importance_heatmap(
+            _shap_vals, y_explain, all_cols,
+            class_names=_class_names,
+            title=f"Per-Class SHAP Heatmap — {_name}",
+        )
+
+    mo.md(f"Signed importance: {len(figs_signed_importance)} figures | Heatmaps: {len(figs_heatmap_per_class)} figures")
+    return figs_heatmap_per_class, figs_signed_importance, plt
+
+
+@app.cell
 def _(
     OmegaConf,
     cfg,
@@ -544,6 +578,8 @@ def _(
     fig_importance,
     figs_beeswarm_derived,
     figs_beeswarm_pv,
+    figs_heatmap_per_class,
+    figs_signed_importance,
     mlflow,
     mo,
     plt,
@@ -594,6 +630,13 @@ def _(
         mlflow.log_figure(fig_heatmap, "shap/importance/heatmap.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig_heatmap)
 
+        for _name, _fig in figs_signed_importance.items():
+            mlflow.log_figure(_fig, f"shap/importance/signed/{_name}.png", save_kwargs={"bbox_inches": "tight"})
+            plt.close(_fig)
+        for _name, _fig in figs_heatmap_per_class.items():
+            mlflow.log_figure(_fig, f"shap/importance/heatmap-per-class/{_name}.png", save_kwargs={"bbox_inches": "tight"})
+            plt.close(_fig)
+
     mo.md("""
     ## MLflow Logging Complete
 
@@ -606,6 +649,8 @@ def _(
     | `shap/dependence/numeric/` | margin, p-values, confidence+credibility |
     | `shap/dependence/categorical/` | margin, p-values, confidence+credibility |
     | `shap/importance/` | bar chart + normalized heatmap |
+    | `shap/importance/signed/` | Signed importance by class per target |
+    | `shap/importance/heatmap-per-class/` | Per-class heatmap per target |
     """)
     return
 
