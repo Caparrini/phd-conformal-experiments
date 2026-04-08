@@ -101,7 +101,7 @@ def _(X_test, cfg, conf_clf, mo, np, pd, y_test):
 
     np.random.seed(cfg.experiment.seed)
     n_test = len(X_test)
-    background_idx = np.random.choice(n_test, size=1000, replace=False)
+    background_idx = np.random.choice(n_test, size=200, replace=False)
     explain_idx = np.random.choice(
         np.setdiff1d(np.arange(n_test), background_idx), size=2000, replace=False
     )
@@ -162,7 +162,7 @@ def _(EXPERIMENT_DIR, X_background, X_explain, full_pvalue_func, mo, model_id):
 
     shap_kernel = compute_or_load_shap(
         full_pvalue_func, X_background, X_explain,
-        nsamples=10000, model_id=model_id,
+        nsamples=2**8, model_id=model_id,
         cache_dir=EXPERIMENT_DIR / "cache",
     )
     # shape: (n_samples, n_features, n_outputs)

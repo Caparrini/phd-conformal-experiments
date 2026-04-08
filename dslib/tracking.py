@@ -24,19 +24,19 @@ References:
 """
 
 import hashlib
-import os
 import subprocess
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
-from urllib.parse import urlparse
+from typing import TYPE_CHECKING, Any, Optional
 from uuid import uuid4
 
-import boto3
 import mlflow
 from loguru import logger
 from mlflow import MlflowClient
 from mlflow.entities import ViewType
+
+if TYPE_CHECKING:
+    from dslib.mlflow_config import MLflowConfig
 
 
 def _get_git_commit() -> str:
@@ -115,6 +115,7 @@ def tracked_run(
     data_path: str | Path,
     experiment_name: str,
     run_name: str | None = None,
+    mlflow_config: Optional["MLflowConfig"] = None,
 ):
     """Context manager that adds data provenance and config to an MLflow run.
 
@@ -133,21 +134,35 @@ def tracked_run(
         data_path: Path to the input data file.
         experiment_name: MLflow experiment name.
         run_name: Optional name for this specific run.
+        mlflow_config: Optional MLflowConfig instance for centralized configuration.
+                      If None, uses default MLflow environment settings.
 
     Yields:
         The active mlflow.ActiveRun.
 
-    Example using Hydra Compose API (e.g. in marimo):
+    Example using MLflowConfig:
+        from dslib.mlflow_config import load_mlflow_config
         from hydra import initialize, compose
+
+        config = load_mlflow_config()
+        config.validate_and_log()  # Validates connectivity upfront
 
         with initialize(config_path="configs"):
             cfg = compose(config_name="config")
 
         mlflow.autolog()
-        with tracked_run(cfg, "data/cleaned/lending_club.parquet", "conformal-p2p"):
+        with tracked_run(cfg, "data/cleaned/lending_club.parquet", 
+                        "conformal-p2p", mlflow_config=config):
             pipeline.fit(X_train, y_train)
     """
     data_path = Path(data_path)
+
+    # Use centralized MLflow config if provided
+    if mlflow_config is not None:
+        mlflow.set_tracking_uri(mlflow_config.tracking_uri)
+        experiment_id = mlflow_config.get_or_create_experiment(experiment_name)
+    else:
+        mlflow.set_experiment(experiment_name)
 
     git_dirty = _has_uncommitted_changes()
     if git_dirty:
@@ -160,8 +175,6 @@ def tracked_run(
         _compute_file_hash(data_path) if data_path.exists() else "file_not_found"
     )
     config_dict = _to_dict(config)
-
-    mlflow.set_experiment(experiment_name)
 
     with mlflow.start_run(run_name=run_name) as run:
         mlflow.set_tag("git_commit", git_commit)
@@ -185,13 +198,14 @@ def purge_experiment(
     experiment_name: str,
     *,
     tracking_uri: str | None = None,
+    mlflow_config: Optional["MLflowConfig"] = None,
 ) -> None:
     """Completely remove an MLflow experiment, freeing its name for reuse.
 
     MLflow's default delete is a soft-delete that keeps the name reserved.
     This function renames the experiment to a UUID first (freeing the name
-    immediately), deletes all artifacts from MinIO/S3, soft-deletes all runs,
-    and finally soft-deletes the experiment itself.
+    immediately), soft-deletes all runs, and finally soft-deletes the
+    experiment itself.
 
     Parameters
     ----------
@@ -199,16 +213,23 @@ def purge_experiment(
         Name of the experiment to purge.
     tracking_uri : str, optional
         MLflow tracking URI. If None, uses the current environment setting.
+        Deprecated: use mlflow_config parameter instead.
+    mlflow_config : MLflowConfig, optional
+        Centralized configuration. If provided, uses this config's tracking URI.
 
     Raises
     ------
     ValueError
         If no experiment with the given name exists.
     """
-    if tracking_uri is not None:
-        mlflow.set_tracking_uri(tracking_uri)
-
-    client = MlflowClient()
+    # Use mlflow_config if provided, otherwise fall back to tracking_uri parameter
+    if mlflow_config is not None:
+        mlflow.set_tracking_uri(mlflow_config.tracking_uri)
+        client = mlflow_config.get_client()
+    else:
+        if tracking_uri is not None:
+            mlflow.set_tracking_uri(tracking_uri)
+        client = MlflowClient()
     experiment = client.get_experiment_by_name(experiment_name)
     if experiment is None:
         raise ValueError(f"Experiment '{experiment_name}' not found.")
@@ -224,43 +245,11 @@ def purge_experiment(
         run_view_type=ViewType.ALL,
     )
 
-    # Step 3: delete artifacts from MinIO/S3
-    try:
-        if runs:
-            artifact_uri = runs[0].info.artifact_uri  # e.g. s3://mlflow/<exp_id>/<run_id>/artifacts
-            parsed = urlparse(artifact_uri)
-            bucket = parsed.netloc
-            # prefix is everything up to (and including) the experiment_id segment
-            prefix = f"{exp_id}/"
-
-            s3 = boto3.client(
-                "s3",
-                endpoint_url=os.environ.get("MLFLOW_S3_ENDPOINT_URL"),
-            )
-            paginator = s3.get_paginator("list_objects_v2")
-            keys_to_delete: list[dict] = []
-            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-                for obj in page.get("Contents", []):
-                    keys_to_delete.append({"Key": obj["Key"]})
-                    if len(keys_to_delete) == 1000:
-                        s3.delete_objects(
-                            Bucket=bucket,
-                            Delete={"Objects": keys_to_delete},
-                        )
-                        keys_to_delete = []
-            if keys_to_delete:
-                s3.delete_objects(
-                    Bucket=bucket,
-                    Delete={"Objects": keys_to_delete},
-                )
-    except Exception as exc:
-        logger.warning(f"Could not delete artifacts from MinIO (skipping): {exc}")
-
-    # Step 4: soft-delete all runs
+    # Step 3: soft-delete all runs via MLflow API
     for run in runs:
         client.delete_run(run.info.run_id)
 
-    # Step 5: soft-delete the experiment (now named UUID, invisible forever)
+    # Step 4: soft-delete the experiment (now named UUID, invisible forever)
     client.delete_experiment(exp_id)
 
     logger.info(f"Experiment '{experiment_name}' purged (id={exp_id})")

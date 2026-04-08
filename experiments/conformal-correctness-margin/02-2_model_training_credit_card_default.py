@@ -28,6 +28,17 @@ def _(Path):
 
 
 @app.cell
+def _():
+    """Initialize centralized MLflow configuration."""
+    from dslib.mlflow_config import load_mlflow_config
+    
+    mlflow_config = load_mlflow_config()
+    mlflow_config.validate_and_log()
+    
+    return mlflow_config
+
+
+@app.cell
 def _(EXPERIMENT_DIR, cfg):
     import polars as pl
 
@@ -105,6 +116,7 @@ def _(
     X_train,
     cfg,
     data_path,
+    mlflow_config,
     mo,
     pipeline,
     y_cal,
@@ -133,7 +145,7 @@ def _(
     mlflow.sklearn.autolog()
     config_dict = OmegaConf.to_container(cfg, resolve=True)
 
-    with tracked_run(config_dict, data_path, cfg.experiment.name, run_name="credit-card-xgboost"):
+    with tracked_run(config_dict, data_path, cfg.experiment.name, run_name="credit-card-xgboost", mlflow_config=mlflow_config):
         pipeline.fit(X_train, y_train)
 
         train_metrics = _metrics(

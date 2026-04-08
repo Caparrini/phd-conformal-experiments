@@ -219,7 +219,7 @@ class TestTrackedRun:
 # purge_experiment
 # ---------------------------------------------------------------------------
 class TestPurgeExperiment:
-    def _make_client(self, exp_id: str = "7", artifact_uri: str = "s3://mlflow/7/run-1/artifacts"):
+    def _make_client(self, exp_id: str = "7", artifact_uri: str = "file:./mlruns/7/run-1/artifacts"):
         """Return a MagicMock simulating MlflowClient."""
         client = MagicMock()
         exp = MagicMock()
@@ -232,12 +232,10 @@ class TestPurgeExperiment:
         client.search_runs.return_value = [run]
         return client
 
-    @patch("dslib.tracking.boto3")
     @patch("dslib.tracking.MlflowClient")
-    def test_frees_experiment_name(self, MockClient, mock_boto3):
+    def test_frees_experiment_name(self, MockClient):
         client = self._make_client()
         MockClient.return_value = client
-        mock_boto3.client.return_value.get_paginator.return_value.paginate.return_value = []
 
         purge_experiment("my-experiment")
 
@@ -252,19 +250,17 @@ class TestPurgeExperiment:
         # the new name must NOT be "my-experiment"
         assert rename_call.args[1] != "my-experiment"
 
-    @patch("dslib.tracking.boto3")
     @patch("dslib.tracking.MlflowClient")
-    def test_deletes_all_runs(self, MockClient, mock_boto3):
+    def test_deletes_all_runs(self, MockClient):
         client = self._make_client()
         run2 = MagicMock()
         run2.info.run_id = "run-2"
-        run2.info.artifact_uri = "s3://mlflow/7/run-2/artifacts"
+        run2.info.artifact_uri = "file:./mlruns/7/run-2/artifacts"
         client.search_runs.return_value = [
             client.search_runs.return_value[0],
             run2,
         ]
         MockClient.return_value = client
-        mock_boto3.client.return_value.get_paginator.return_value.paginate.return_value = []
 
         purge_experiment("my-experiment")
 
@@ -278,28 +274,6 @@ class TestPurgeExperiment:
         from mlflow.entities import ViewType
         assert kwargs.get("run_view_type") == ViewType.ALL
 
-    @patch("dslib.tracking.boto3")
-    @patch("dslib.tracking.MlflowClient")
-    def test_cleans_artifacts_from_minio(self, MockClient, mock_boto3):
-        client = self._make_client(exp_id="7", artifact_uri="s3://mlflow/7/run-1/artifacts")
-        MockClient.return_value = client
-
-        s3_client = MagicMock()
-        mock_boto3.client.return_value = s3_client
-
-        page = {"Contents": [{"Key": "7/run-1/artifacts/model.pkl"}]}
-        s3_client.get_paginator.return_value.paginate.return_value = [page]
-
-        purge_experiment("my-experiment")
-
-        s3_client.get_paginator.assert_called_once_with("list_objects_v2")
-        s3_client.get_paginator.return_value.paginate.assert_called_once_with(
-            Bucket="mlflow", Prefix="7/"
-        )
-        s3_client.delete_objects.assert_called_once()
-        delete_arg = s3_client.delete_objects.call_args.kwargs["Delete"]["Objects"]
-        assert delete_arg == [{"Key": "7/run-1/artifacts/model.pkl"}]
-
     @patch("dslib.tracking.MlflowClient")
     def test_raises_if_experiment_not_found(self, MockClient):
         client = MagicMock()
@@ -308,18 +282,3 @@ class TestPurgeExperiment:
 
         with pytest.raises(ValueError, match="not found"):
             purge_experiment("nonexistent-experiment")
-
-    @patch("dslib.tracking.boto3")
-    @patch("dslib.tracking.MlflowClient")
-    def test_continues_if_minio_unavailable(self, MockClient, mock_boto3):
-        client = self._make_client()
-        MockClient.return_value = client
-
-        mock_boto3.client.side_effect = Exception("MinIO connection refused")
-
-        # Should NOT raise — just warn and proceed
-        purge_experiment("my-experiment")
-
-        # MLflow soft-delete must still happen
-        client.delete_run.assert_called_once_with("run-1")
-        client.delete_experiment.assert_called_once_with("7")

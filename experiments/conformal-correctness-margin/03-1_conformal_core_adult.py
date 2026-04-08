@@ -21,6 +21,17 @@ def _():
 
 
 @app.cell
+def _():
+    """Initialize centralized MLflow configuration."""
+    from dslib.mlflow_config import load_mlflow_config
+    
+    mlflow_config = load_mlflow_config()
+    mlflow_config.validate_and_log()
+    
+    return mlflow_config
+
+
+@app.cell
 def _(EXPERIMENT_DIR, cfg):
     from dslib.data_utils import stratified_split
 
@@ -71,6 +82,7 @@ def _(
     class_names,
     data_path,
     mlflow,
+    mlflow_config,
     pipeline,
     y_cal,
     y_test,
@@ -97,6 +109,7 @@ def _(
     with tracked_run(
         config_dict, data_path, cfg.experiment.name,
         run_name="adult-conformal-evaluation",
+        mlflow_config=mlflow_config,
     ):
         conf_clf = ConformalClassifier(
             model=pipeline,

@@ -21,6 +21,11 @@ from typing import Any
 import mlflow
 import mlflow.entities
 from jinja2 import Environment, FileSystemLoader
+from dslib.mlflow_config import load_mlflow_config
+
+# Initialize and validate centralized MLflow configuration
+mlflow_config = load_mlflow_config()
+mlflow_config.validate_and_log()
 
 EXPERIMENT_NAME = "conformal-p2p"
 EXPERIMENT_DIR = Path(__file__).parent

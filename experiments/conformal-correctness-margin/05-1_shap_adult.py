@@ -34,6 +34,17 @@ Results logged to MLflow as run `adult-shap-analysis`.
 
 
 @app.cell
+def _():
+    """Initialize centralized MLflow configuration."""
+    from dslib.mlflow_config import load_mlflow_config
+    
+    mlflow_config = load_mlflow_config()
+    mlflow_config.validate_and_log()
+    
+    return mlflow_config
+
+
+@app.cell
 def _(EXPERIMENT_DIR, cfg, mo):
     from dslib.data_utils import stratified_split
 
@@ -394,13 +405,13 @@ def _(
     fig_heatmap, fig_importance,
     figs_beeswarm_derived, figs_beeswarm_pv,
     figs_heatmap_per_class, figs_signed_importance,
-    mlflow, mo, numeric_cols, plt,
+    mlflow, mlflow_config, mo, numeric_cols, plt,
 ):
     from dslib.tracking import tracked_run
 
     _config_dict = OmegaConf.to_container(cfg, resolve=True)
 
-    with tracked_run(_config_dict, data_path, cfg.experiment.name, run_name="adult-shap-analysis"):
+    with tracked_run(_config_dict, data_path, cfg.experiment.name, run_name="adult-shap-analysis", mlflow_config=mlflow_config):
         mlflow.log_params({
             "n_background": 50,
             "n_explain": 100,

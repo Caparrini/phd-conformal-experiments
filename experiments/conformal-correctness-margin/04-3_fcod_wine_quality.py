@@ -58,6 +58,17 @@ def _():
 
 
 @app.cell
+def _():
+    """Initialize centralized MLflow configuration."""
+    from dslib.mlflow_config import load_mlflow_config
+    
+    mlflow_config = load_mlflow_config()
+    mlflow_config.validate_and_log()
+    
+    return mlflow_config
+
+
+@app.cell
 def _(EXPERIMENT_DIR, cfg, mo):
     from dslib.data_utils import stratified_split
     from sklearn.preprocessing import LabelEncoder
@@ -535,6 +546,7 @@ def _(
     fcod_results_merged,
     math,
     mlflow,
+    mlflow_config,
     mo,
     np,
     plot_fcod,
@@ -553,7 +565,7 @@ def _(
 
         config_dict = OmegaConf.to_container(cfg, resolve=True)
 
-        with tracked_run(config_dict, data_path, cfg.experiment.name, run_name="wine-fcod-analysis"):
+        with tracked_run(config_dict, data_path, cfg.experiment.name, run_name="wine-fcod-analysis", mlflow_config=mlflow_config):
             # FCOD line plots with CI
             _n_feat = len(fcod_results_ci)
             _n_rows = math.ceil(_n_feat / N_COLS)
