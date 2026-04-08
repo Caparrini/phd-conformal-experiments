@@ -8,8 +8,12 @@ app = marimo.App(width="medium")
 def _():
     import marimo as mo
     from pathlib import Path
+    from dslib.mlflow_config import load_mlflow_config
 
-    return Path, mo
+    mlflow_config = load_mlflow_config()
+    mlflow_config.validate_and_log()
+
+    return Path, mlflow_config, mo
 
 
 @app.cell
@@ -110,6 +114,7 @@ def _(
     X_train,
     cfg,
     data_path,
+    mlflow_config,
     mo,
     pipeline,
     y_cal,
@@ -130,7 +135,11 @@ def _(
     config_dict = OmegaConf.to_container(cfg, resolve=True)
 
     with tracked_run(
-        config_dict, data_path, cfg.experiment.name, run_name="xgboost-baseline"
+        config_dict,
+        data_path,
+        cfg.experiment.name,
+        run_name="xgboost-baseline",
+        mlflow_config=mlflow_config,
     ):
         pipeline.fit(X_train, y_train)
 

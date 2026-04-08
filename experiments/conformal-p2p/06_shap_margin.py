@@ -16,12 +16,16 @@ def _():
     import shap
     import pandas as pd
     import mlflow
+    from dslib.mlflow_config import load_mlflow_config
 
     EXPERIMENT_DIR = Path(__file__).parent
     CONFIG_DIR = str(EXPERIMENT_DIR / "config")
 
     with initialize_config_dir(config_dir=CONFIG_DIR, version_base=None):
         cfg = compose(config_name="config")
+
+    mlflow_config = load_mlflow_config()
+    mlflow_config.validate_and_log()
 
     mo.md("""
     # SHAP Margin Analysis — Conformal P2P Lending
@@ -30,7 +34,7 @@ def _():
     All 8 features (4 numeric + 4 categorical) included via integer encoding.
     Results logged to MLflow.
     """)
-    return EXPERIMENT_DIR, OmegaConf, cfg, mlflow, mo, np, pd, plt, shap, sns
+    return EXPERIMENT_DIR, OmegaConf, cfg, mlflow, mlflow_config, mo, np, pd, plt, shap, sns
 
 
 @app.cell
@@ -55,7 +59,7 @@ def _(EXPERIMENT_DIR, cfg):
 
 
 @app.cell
-def _(cfg, mlflow, mo):
+def _(cfg, mlflow, mlflow_config, mo):
     experiment = mlflow.get_experiment_by_name(cfg.experiment.name)
 
     models = mlflow.search_logged_models(
@@ -101,9 +105,22 @@ def _(X_test, cfg, conf_clf, mo, np, pd, y_test):
 
     np.random.seed(cfg.experiment.seed)
     n_test = len(X_test)
-    background_idx = np.random.choice(n_test, size=200, replace=False)
+    n_background = int(cfg.shap.n_background)
+    n_explain_target = int(cfg.shap.n_explain)
+
+    if n_background >= n_test:
+        raise ValueError(
+            f"Invalid cfg.shap.n_background={n_background}: must be < n_test={n_test}."
+        )
+    if n_explain_target > (n_test - n_background):
+        raise ValueError(
+            "Invalid cfg.shap.n_explain={}: must be <= n_test - n_background={} "
+            "for sampling without replacement.".format(n_explain_target, n_test - n_background)
+        )
+
+    background_idx = np.random.choice(n_test, size=n_background, replace=False)
     explain_idx = np.random.choice(
-        np.setdiff1d(np.arange(n_test), background_idx), size=2000, replace=False
+        np.setdiff1d(np.arange(n_test), background_idx), size=n_explain_target, replace=False
     )
     y_explain = y_test.values[explain_idx]
     n_explain = len(explain_idx)
@@ -157,12 +174,12 @@ def _(X_test, cfg, conf_clf, mo, np, pd, y_test):
 
 
 @app.cell
-def _(EXPERIMENT_DIR, X_background, X_explain, full_pvalue_func, mo, model_id):
+def _(EXPERIMENT_DIR, X_background, X_explain, cfg, full_pvalue_func, mo, model_id):
     from dslib.shap_cache import compute_or_load_shap
 
     shap_kernel = compute_or_load_shap(
         full_pvalue_func, X_background, X_explain,
-        nsamples=2**8, model_id=model_id,
+        nsamples=int(cfg.shap.nsamples), model_id=model_id,
         cache_dir=EXPERIMENT_DIR / "cache",
     )
     # shape: (n_samples, n_features, n_outputs)
@@ -566,6 +583,10 @@ def _(all_cols, mo, plt, shap_confidence, shap_credibility, shap_margin, shap_p0
 @app.cell
 def _(
     OmegaConf,
+    X_background,
+    X_explain,
+    all_cols,
+    categorical_cols,
     cfg,
     data_path,
     fig_dep_cc_cat,
@@ -581,21 +602,29 @@ def _(
     figs_heatmap_per_class,
     figs_signed_importance,
     mlflow,
+    mlflow_config,
     mo,
+    numeric_cols,
     plt,
 ):
     from dslib.tracking import tracked_run
 
     config_dict = OmegaConf.to_container(cfg, resolve=True)
 
-    with tracked_run(config_dict, data_path, cfg.experiment.name, run_name="shap-margin-analysis"):
+    with tracked_run(
+        config_dict,
+        data_path,
+        cfg.experiment.name,
+        run_name="shap-margin-analysis",
+        mlflow_config=mlflow_config,
+    ):
         mlflow.log_params({
-            "n_background": 50,
-            "n_explain": 100,
-            "nsamples_shap": 500,
-            "n_features_total": 8,
-            "n_features_numeric": 4,
-            "n_features_categorical": 4,
+            "n_background": len(X_background),
+            "n_explain": len(X_explain),
+            "nsamples_shap": int(cfg.shap.nsamples),
+            "n_features_total": len(all_cols),
+            "n_features_numeric": len(numeric_cols),
+            "n_features_categorical": len(categorical_cols),
         })
 
         # Beeswarm — p-values

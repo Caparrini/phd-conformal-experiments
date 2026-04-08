@@ -112,9 +112,22 @@ def _(X_test, cfg, conf_clf, mo, np, pd, y_test):
 
     np.random.seed(cfg.experiment.seed)
     n_test = len(X_test)
-    background_idx = np.random.choice(n_test, size=50, replace=False)
+    n_background = int(cfg.shap.n_background)
+    n_explain_target = int(cfg.shap.n_explain)
+
+    if n_background >= n_test:
+        raise ValueError(
+            f"Invalid cfg.shap.n_background={n_background}: must be < n_test={n_test}."
+        )
+    if n_explain_target > (n_test - n_background):
+        raise ValueError(
+            "Invalid cfg.shap.n_explain={}: must be <= n_test - n_background={} "
+            "for sampling without replacement.".format(n_explain_target, n_test - n_background)
+        )
+
+    background_idx = np.random.choice(n_test, size=n_background, replace=False)
     explain_idx = np.random.choice(
-        np.setdiff1d(np.arange(n_test), background_idx), size=100, replace=False
+        np.setdiff1d(np.arange(n_test), background_idx), size=n_explain_target, replace=False
     )
     y_explain = y_test.values[explain_idx]
     n_explain = len(explain_idx)
@@ -155,12 +168,12 @@ def _(X_test, cfg, conf_clf, mo, np, pd, y_test):
 
 
 @app.cell
-def _(EXPERIMENT_DIR, X_background, X_explain, full_pvalue_func, mo, model_run_id):
+def _(EXPERIMENT_DIR, X_background, X_explain, cfg, full_pvalue_func, mo, model_run_id):
     from dslib.shap_cache import compute_or_load_shap
 
     shap_kernel = compute_or_load_shap(
         full_pvalue_func, X_background, X_explain,
-        nsamples=500, model_id=model_run_id,
+        nsamples=int(cfg.shap.nsamples), model_id=model_run_id,
         cache_dir=EXPERIMENT_DIR / "cache",
     )
     # shape: (n_samples, n_features, n_classes)
@@ -400,7 +413,7 @@ def _(all_cols, mo, n_classes, np, plt, shap_confidence, shap_credibility, shap_
 
 @app.cell
 def _(
-    OmegaConf, all_cols, categorical_cols, cfg, data_path,
+    OmegaConf, X_background, X_explain, all_cols, categorical_cols, cfg, data_path,
     fig_dep_margin_cat, fig_dep_margin_num,
     fig_heatmap, fig_importance,
     figs_beeswarm_derived, figs_beeswarm_pv,
@@ -413,9 +426,9 @@ def _(
 
     with tracked_run(_config_dict, data_path, cfg.experiment.name, run_name="credit-card-shap-analysis", mlflow_config=mlflow_config):
         mlflow.log_params({
-            "n_background": 50,
-            "n_explain": 100,
-            "nsamples_shap": 500,
+            "n_background": len(X_background),
+            "n_explain": len(X_explain),
+            "nsamples_shap": int(cfg.shap.nsamples),
             "n_features_total": len(all_cols),
             "n_features_numeric": len(numeric_cols),
             "n_features_categorical": len(categorical_cols),

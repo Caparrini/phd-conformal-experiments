@@ -31,3 +31,8 @@ experiment:
   name: "conformal-correctness-margin"
   seed: 42
   run_name: "adult-xgboost"
+
+shap:
+  n_background: 300
+  n_explain: 1000
+  nsamples: 256

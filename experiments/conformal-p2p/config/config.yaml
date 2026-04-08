@@ -48,3 +48,9 @@ conformal:
 experiment:
   name: "conformal-p2p"
   seed: 42
+
+## SHAP analysis
+shap:
+  n_background: 300
+  n_explain: 2000
+  nsamples: 256

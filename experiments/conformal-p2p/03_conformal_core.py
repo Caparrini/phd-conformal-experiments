@@ -10,13 +10,17 @@ def _():
     from pathlib import Path
     from hydra import initialize_config_dir, compose
     from omegaconf import OmegaConf
+    from dslib.mlflow_config import load_mlflow_config
 
     EXPERIMENT_DIR = Path(__file__).parent
     CONFIG_DIR = str(EXPERIMENT_DIR / "config")
 
     with initialize_config_dir(config_dir=CONFIG_DIR, version_base=None):
         cfg = compose(config_name="config")
-    return EXPERIMENT_DIR, OmegaConf, cfg, mo
+
+    mlflow_config = load_mlflow_config()
+    mlflow_config.validate_and_log()
+    return EXPERIMENT_DIR, OmegaConf, cfg, mlflow_config, mo
 
 
 @app.cell
@@ -42,7 +46,7 @@ def _(EXPERIMENT_DIR, cfg):
 
 
 @app.cell
-def _(cfg, mo):
+def _(cfg, mlflow_config, mo):
     import mlflow
 
     experiment = mlflow.get_experiment_by_name(cfg.experiment.name)
@@ -67,6 +71,7 @@ def _(
     X_test,
     cfg,
     data_path,
+    mlflow_config,
     mlflow,
     pipeline,
     y_cal,
@@ -90,7 +95,11 @@ def _(
     alpha = cfg.conformal.alpha
 
     with tracked_run(
-        config_dict, data_path, cfg.experiment.name, run_name="conformal-evaluation"
+        config_dict,
+        data_path,
+        cfg.experiment.name,
+        run_name="conformal-evaluation",
+        mlflow_config=mlflow_config,
     ):
         conf_clf = ConformalClassifier(
             model=pipeline,

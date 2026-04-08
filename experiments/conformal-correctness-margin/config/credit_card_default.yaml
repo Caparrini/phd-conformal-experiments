@@ -31,3 +31,8 @@ experiment:
   name: "conformal-correctness-margin"
   seed: 42
   run_name: "credit-card-xgboost"
+
+shap:
+  n_background: 50
+  n_explain: 100
+  nsamples: 500

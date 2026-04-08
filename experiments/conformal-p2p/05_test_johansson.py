@@ -13,12 +13,16 @@ def _():
     import numpy as np
     import matplotlib.pyplot as plt
     import shap
+    from dslib.mlflow_config import load_mlflow_config
 
     EXPERIMENT_DIR = Path(__file__).parent
     CONFIG_DIR = str(EXPERIMENT_DIR / "config")
 
     with initialize_config_dir(config_dir=CONFIG_DIR, version_base=None):
         cfg = compose(config_name="config")
+
+    mlflow_config = load_mlflow_config()
+    mlflow_config.validate_and_log()
 
     mo.md("""
 # Johansson (2025) Clarification & Implementation Verification
@@ -30,7 +34,7 @@ This notebook verifies three empirical claims:
    not TreeSHAP, is the correct methodology
 3. Linearity holds: SHAP(p_true − p_false) ≈ SHAP(p_true) − SHAP(p_false)
     """)
-    return EXPERIMENT_DIR, OmegaConf, cfg, mo, np, plt, shap
+    return EXPERIMENT_DIR, OmegaConf, cfg, mlflow_config, mo, np, plt, shap
 
 
 @app.cell
@@ -56,7 +60,7 @@ def _(EXPERIMENT_DIR, cfg):
 
 
 @app.cell
-def _(cfg, mo):
+def _(cfg, mlflow_config, mo):
     import mlflow
 
     experiment = mlflow.get_experiment_by_name(cfg.experiment.name)

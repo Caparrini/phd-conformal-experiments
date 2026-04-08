@@ -16,6 +16,7 @@ def _():
 
     from hydra import initialize_config_dir, compose
     from omegaconf import OmegaConf
+    from dslib.mlflow_config import load_mlflow_config
 
     from conformalpy.fcod import (
         compute_fcod_smoothed,
@@ -33,6 +34,9 @@ def _():
     with initialize_config_dir(config_dir=CONFIG_DIR, version_base=None):
         cfg = compose(config_name="config")
 
+    mlflow_config = load_mlflow_config()
+    mlflow_config.validate_and_log()
+
     alpha = cfg.conformal.alpha
     return (
         EXPERIMENT_DIR,
@@ -45,6 +49,7 @@ def _():
         json,
         math,
         mlflow,
+        mlflow_config,
         mo,
         np,
         plot_fcod,
@@ -80,7 +85,7 @@ def _(EXPERIMENT_DIR, cfg, mo):
 
 
 @app.cell
-def _(cfg, json, mlflow, mo):
+def _(cfg, json, mlflow, mlflow_config, mo):
     experiment = mlflow.get_experiment_by_name(cfg.experiment.name)
 
     runs = mlflow.search_runs(
@@ -464,6 +469,7 @@ def _(
     fcod_results_merged,
     math,
     mlflow,
+    mlflow_config,
     mo,
     np,
     plot_fcod,
@@ -481,7 +487,13 @@ def _(
 
         config_dict = OmegaConf.to_container(cfg, resolve=True)
 
-        with tracked_run(config_dict, data_path, cfg.experiment.name, run_name="fcod-analysis"):
+        with tracked_run(
+            config_dict,
+            data_path,
+            cfg.experiment.name,
+            run_name="fcod-analysis",
+            mlflow_config=mlflow_config,
+        ):
             # FCOD line plots with CI
             fig_ci, axes = plt.subplots(2, 2, figsize=(14, 10))
             for idx, (feature_name, fcod) in enumerate(fcod_results_ci.items()):

@@ -156,6 +156,7 @@ def tracked_run(
             pipeline.fit(X_train, y_train)
     """
     data_path = Path(data_path)
+    experiment_id: str | None = None
 
     # Use centralized MLflow config if provided
     if mlflow_config is not None:
@@ -163,6 +164,9 @@ def tracked_run(
         experiment_id = mlflow_config.get_or_create_experiment(experiment_name)
     else:
         mlflow.set_experiment(experiment_name)
+        experiment = mlflow.get_experiment_by_name(experiment_name)
+        if experiment is not None:
+            experiment_id = experiment.experiment_id
 
     git_dirty = _has_uncommitted_changes()
     if git_dirty:
@@ -176,7 +180,7 @@ def tracked_run(
     )
     config_dict = _to_dict(config)
 
-    with mlflow.start_run(run_name=run_name) as run:
+    with mlflow.start_run(run_name=run_name, experiment_id=experiment_id) as run:
         mlflow.set_tag("git_commit", git_commit)
         mlflow.set_tag("git_dirty", git_dirty)
         mlflow.set_tag("data_path", str(data_path))
