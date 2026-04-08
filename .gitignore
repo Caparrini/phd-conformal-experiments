@@ -30,3 +30,7 @@ CLAUDE.md
 
 # SHAP joblib cache
 **/cache/
+
+# Local macOS / SQLite artifacts
+.DS_Store
+*.db
