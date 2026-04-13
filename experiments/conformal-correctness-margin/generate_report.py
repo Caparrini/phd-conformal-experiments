@@ -64,13 +64,16 @@ DATASETS: list[dict[str, str]] = [
 
 # SHAP artifact paths to display (curated subset)
 SHAP_DISPLAY_ARTIFACTS: dict[str, str] = {
-    "margin_beeswarm_all":            "shap/beeswarm/derived/margin_all.png",
-    "confidence_beeswarm_all":        "shap/beeswarm/derived/confidence_all.png",
-    "credibility_beeswarm_all":       "shap/beeswarm/derived/credibility_all.png",
-    "dependence_numeric_margin":      "shap/dependence/numeric/margin.png",
-    "dependence_categorical_margin":  "shap/dependence/categorical/margin.png",
-    "importance_margin":              "shap/importance/margin_importance.png",
-    "importance_heatmap":             "shap/importance/heatmap.png",
+    "margin_beeswarm_all":                "shap/beeswarm/derived/margin_all.png",
+    "p1_minus_p0_beeswarm_all":           "shap/beeswarm/derived/p1_minus_p0_all.png",
+    "confidence_beeswarm_all":            "shap/beeswarm/derived/confidence_all.png",
+    "credibility_beeswarm_all":           "shap/beeswarm/derived/credibility_all.png",
+    "dependence_numeric_margin":          "shap/dependence/numeric/margin.png",
+    "dependence_categorical_margin":      "shap/dependence/categorical/margin.png",
+    "dependence_numeric_p1_minus_p0":     "shap/dependence/numeric/p1_minus_p0.png",
+    "dependence_categorical_p1_minus_p0": "shap/dependence/categorical/p1_minus_p0.png",
+    "importance_margin":                  "shap/importance/margin_importance.png",
+    "importance_heatmap":                 "shap/importance/heatmap.png",
 }
 
 # Primary artifact filenames expected in FCOD runs (order = display order)

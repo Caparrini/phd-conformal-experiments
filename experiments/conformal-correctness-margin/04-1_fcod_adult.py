@@ -26,6 +26,7 @@ def _():
         plot_stacked_bars_by_class,
         plot_multi_feature_fcod,
         plot_uncertainty_zones,
+        bootstrap_fcod_ci
     )
 
     EXPERIMENT_DIR = Path(__file__).parent
@@ -39,12 +40,13 @@ def _():
         EXPERIMENT_DIR,
         OmegaConf,
         alpha,
+        bootstrap_fcod_ci,
         cfg,
         compute_fcod_smoothed,
         compute_fcod_with_ci,
-        merge_uncertain_outcomes,
         json,
         math,
+        merge_uncertain_outcomes,
         mlflow,
         mo,
         np,
@@ -61,11 +63,11 @@ def _():
 def _():
     """Initialize centralized MLflow configuration."""
     from dslib.mlflow_config import load_mlflow_config
-    
+
     mlflow_config = load_mlflow_config()
     mlflow_config.validate_and_log()
-    
-    return mlflow_config
+
+    return (mlflow_config,)
 
 
 @app.cell
@@ -115,9 +117,10 @@ def _(cfg, json, mlflow, mo):
 @app.cell
 def _(
     X_test,
+    bootstrap_fcod_ci,
     cfg,
     compute_fcod_smoothed,
-    compute_fcod_with_ci,
+    merge_uncertain_outcomes,
     mo,
     np,
     prediction_sets,
@@ -130,11 +133,12 @@ def _(
         "capital-loss":   {"label": "Capital Loss ($)",   "clip": (1, float(X_test["capital-loss"].quantile(0.99)))},
         "hours-per-week": {"label": "Hours per Week",     "clip": None},
     }
+
     N_COLS = 3
+    FCOD_PARAMS = dict(n_grid=50, percentile_range=(5, 95), sigma=2.0)
 
     fcod_results = {}
     fcod_results_ci = {}
-
     y_test_arr = np.asarray(y_test)
 
     for feature_name, config in fcod_features.items():
@@ -144,33 +148,48 @@ def _(
             lo, hi = config["clip"]
             mask = (feature_values >= lo) & (feature_values <= hi)
             feature_values_viz = feature_values[mask]
-            pred_sets_viz = [prediction_sets[i] for i in range(len(prediction_sets)) if mask[i]]
-            y_test_viz = y_test_arr[mask]
+            pred_sets_viz      = [prediction_sets[i] for i in np.where(mask)[0]]
+            y_test_viz         = y_test_arr[mask]
         else:
             feature_values_viz = feature_values
-            pred_sets_viz = prediction_sets
-            y_test_viz = y_test_arr
+            pred_sets_viz      = prediction_sets
+            y_test_viz         = y_test_arr
 
+        # Estimación puntual
         fcod = compute_fcod_smoothed(
             feature_values_viz, pred_sets_viz, y_test_viz,
-            n_grid=50, percentile_range=(5, 95),
+            **FCOD_PARAMS,
         )
         fcod["feature_name"] = config["label"]
         fcod_results[feature_name] = fcod
 
-        fcod_ci = compute_fcod_with_ci(
+        # Bootstrap CI con grid fijo = el de la estimación puntual
+        fcod_ci = bootstrap_fcod_ci(
             feature_values_viz, pred_sets_viz, y_test_viz,
-            n_bootstrap=100, n_grid=30, confidence_level=0.95,
+            n_bootstrap=200,
+            confidence_level=0.95,
+            n_grid=FCOD_PARAMS["n_grid"],
+            method="smoothed",
             random_state=cfg.experiment.seed,
+            percentile_range=FCOD_PARAMS["percentile_range"],
+            sigma=FCOD_PARAMS["sigma"],
         )
         fcod_ci["feature_name"] = config["label"]
         fcod_results_ci[feature_name] = fcod_ci
 
-    fcod_results_merged = {k: merge_uncertain_outcomes(v) for k, v in fcod_results.items()}
+    fcod_results_merged    = {k: merge_uncertain_outcomes(v) for k, v in fcod_results.items()}
     fcod_results_ci_merged = {k: merge_uncertain_outcomes(v) for k, v in fcod_results_ci.items()}
 
     mo.md(f"Computed FCODs for {len(fcod_features)} features")
-    return N_COLS, fcod_features, fcod_results, fcod_results_ci, fcod_results_merged, fcod_results_ci_merged
+    return (
+        FCOD_PARAMS,
+        N_COLS,
+        fcod_features,
+        fcod_results,
+        fcod_results_ci,
+        fcod_results_ci_merged,
+        fcod_results_merged,
+    )
 
 
 @app.cell
@@ -316,16 +335,15 @@ def _(X_test, alpha, math, np, plt, prediction_sets, y_test):
     return N_CAT_COLS, cat_features, plot_outcome_distribution_by_category
 
 
-# === Per-class FCOD computation ===
-
-
 @app.cell
 def _(
+    FCOD_PARAMS,
     X_test,
     cfg,
     compute_fcod_smoothed,
     compute_fcod_with_ci,
     fcod_features,
+    merge_uncertain_outcomes,
     mo,
     np,
     prediction_sets,
@@ -333,40 +351,46 @@ def _(
 ):
     _y_arr = np.asarray(y_test)
     unique_classes = np.unique(_y_arr)
-
     fcod_by_class = {}
     fcod_ci_by_class = {}
 
     for _cls in unique_classes:
-        _cls_mask = _y_arr == _cls
-        _X_cls = X_test[_cls_mask]
-        _ps_cls = [prediction_sets[i] for i, m in enumerate(_cls_mask) if m]
-        _y_cls = _y_arr[_cls_mask]
+        _cls_idx = np.where(_y_arr == _cls)[0]
+        _X_cls   = X_test.iloc[_cls_idx]
+        _ps_cls  = [prediction_sets[i] for i in _cls_idx]
+        _y_cls   = _y_arr[_cls_idx]
 
-        fcod_by_class[_cls] = {}
+        fcod_by_class[_cls]    = {}
         fcod_ci_by_class[_cls] = {}
 
         for _feat, _config in fcod_features.items():
             _fv = _X_cls[_feat].values
+
             if _config["clip"] is not None:
                 _lo, _hi = _config["clip"]
-                _fmask = (_fv >= _lo) & (_fv <= _hi)
-                _fv_viz = _fv[_fmask]
-                _ps_viz = [_ps_cls[i] for i in range(len(_ps_cls)) if _fmask[i]]
-                _y_viz = _y_cls[_fmask]
+                _fmask   = np.where((_fv >= _lo) & (_fv <= _hi))[0]
+                _fv_viz  = _fv[_fmask]
+                _ps_viz  = [_ps_cls[i] for i in _fmask]
+                _y_viz   = _y_cls[_fmask]
             else:
                 _fv_viz, _ps_viz, _y_viz = _fv, _ps_cls, _y_cls
 
             _fcod = compute_fcod_smoothed(
-                _fv_viz, _ps_viz, _y_viz, n_grid=50, percentile_range=(5, 95)
+                _fv_viz, _ps_viz, _y_viz,
+                **FCOD_PARAMS,
             )
             _fcod["feature_name"] = _config["label"]
             fcod_by_class[_cls][_feat] = _fcod
 
             _fcod_ci = compute_fcod_with_ci(
                 _fv_viz, _ps_viz, _y_viz,
-                n_bootstrap=100, n_grid=30, confidence_level=0.95,
+                n_bootstrap=200,
+                confidence_level=0.95,
+                n_grid=FCOD_PARAMS["n_grid"],
+                method="bootstrap",
                 random_state=cfg.experiment.seed,
+                percentile_range=FCOD_PARAMS["percentile_range"],
+                sigma=FCOD_PARAMS["sigma"],
             )
             _fcod_ci["feature_name"] = _config["label"]
             fcod_ci_by_class[_cls][_feat] = _fcod_ci
@@ -381,7 +405,13 @@ def _(
     }
 
     mo.md(f"Computed per-class FCODs for {len(unique_classes)} classes")
-    return fcod_by_class, fcod_ci_by_class, fcod_by_class_merged, fcod_ci_by_class_merged, unique_classes
+    return (
+        fcod_by_class,
+        fcod_by_class_merged,
+        fcod_ci_by_class,
+        fcod_ci_by_class_merged,
+        unique_classes,
+    )
 
 
 @app.cell
@@ -399,13 +429,22 @@ def _(N_COLS, alpha, fcod_ci_by_class, math, plot_fcod, plt, unique_classes):
                           xlabel=fcod["feature_name"], title=fcod["feature_name"])
             fig.suptitle(f"Outcome FCODs — Class {cls} (α={alpha})", fontsize=14, y=1.02)
             plt.tight_layout()
+            plt.show()
 
     _()
     return
 
 
 @app.cell
-def _(N_COLS, alpha, fcod_by_class, math, plot_stacked_fcod, plt, unique_classes):
+def _(
+    N_COLS,
+    alpha,
+    fcod_by_class,
+    math,
+    plot_stacked_fcod,
+    plt,
+    unique_classes,
+):
     def _():
         for cls in unique_classes:
             results = fcod_by_class[cls]
@@ -419,6 +458,7 @@ def _(N_COLS, alpha, fcod_by_class, math, plot_stacked_fcod, plt, unique_classes
                                   xlabel=fcod["feature_name"], title=fcod["feature_name"])
             fig.suptitle(f"Outcome Distribution — Class {cls} (α={alpha})", fontsize=14, y=1.02)
             plt.tight_layout()
+            plt.show()
 
     _()
     return

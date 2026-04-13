@@ -4,50 +4,71 @@ __generated_with = "0.20.2"
 app = marimo.App(width="medium")
 
 
+# ---------------------------------------------------------------------------
+# 1. IMPORTS
+# ---------------------------------------------------------------------------
 @app.cell
 def _():
     import marimo as mo
+    import numpy as np
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    import mlflow
+    import shap
     from pathlib import Path
     from hydra import initialize_config_dir, compose
     from omegaconf import OmegaConf
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    import shap
-    import pandas as pd
-    import mlflow
 
+    from conformalpy.classifier import ConformalClassifier
+    from conformalpy.nonconformity import lac_nonconformity
+    from conformalpy.explainability import derive_margin_shap, derive_confidence_shap
+    from conformalpy.shap import (
+        plot_shap_beeswarm,
+        plot_shap_dependence_numeric,
+        plot_shap_dependence_categorical,
+        make_dependence_grid,
+        plot_signed_importance_by_class,
+        plot_signed_importance_heatmap,
+    )
+    from dslib.mlflow_config import load_mlflow_config
+    from dslib.data_utils import stratified_split
+    from dslib.shap_cache import compute_or_load_shap
+    from dslib.tracking import tracked_run
+
+    return (
+        mo, np, pd, plt, mlflow, shap, Path,
+        initialize_config_dir, compose, OmegaConf,
+        ConformalClassifier, lac_nonconformity,
+        derive_margin_shap, derive_confidence_shap,
+        plot_shap_beeswarm, plot_shap_dependence_numeric,
+        plot_shap_dependence_categorical, make_dependence_grid,
+        plot_signed_importance_by_class, plot_signed_importance_heatmap,
+        load_mlflow_config, stratified_split, compute_or_load_shap, tracked_run,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 2. CONFIG
+# ---------------------------------------------------------------------------
+@app.cell
+def _(Path, initialize_config_dir, compose, load_mlflow_config):
     EXPERIMENT_DIR = Path(__file__).parent
     CONFIG_DIR = str(EXPERIMENT_DIR / "config")
 
     with initialize_config_dir(config_dir=CONFIG_DIR, version_base=None):
         cfg = compose(config_name="adult")
 
-    mo.md("""
-# SHAP Margin Analysis — Adult (conformal-correctness-margin)
-
-SHAP explainability on the conformal classifier for the Adult income dataset.
-All 12 features (5 numeric + 7 categorical) included via integer encoding.
-Results logged to MLflow as run `adult-shap-analysis`.
-    """)
-    return EXPERIMENT_DIR, OmegaConf, cfg, mlflow, mo, np, pd, plt, shap, sns
-
-
-@app.cell
-def _():
-    """Initialize centralized MLflow configuration."""
-    from dslib.mlflow_config import load_mlflow_config
-    
     mlflow_config = load_mlflow_config()
     mlflow_config.validate_and_log()
-    
-    return mlflow_config
+
+    return cfg, mlflow_config, EXPERIMENT_DIR
 
 
+# ---------------------------------------------------------------------------
+# 3. DATOS
+# ---------------------------------------------------------------------------
 @app.cell
-def _(EXPERIMENT_DIR, cfg, mo):
-    from dslib.data_utils import stratified_split
-
+def _(cfg, EXPERIMENT_DIR, stratified_split, mo):
     data_path = EXPERIMENT_DIR / cfg.data.file
     feature_cols = list(cfg.data.features.numerical) + list(cfg.data.features.categorical)
 
@@ -59,14 +80,16 @@ def _(EXPERIMENT_DIR, cfg, mo):
         calibration_size=cfg.data.splits.calibration_size,
         seed=cfg.data.splits.seed,
     )
-
     X_cal, y_cal = splits["calibration"]
     X_test, y_test = splits["test"]
 
-    mo.md(f"Calibration: {len(X_cal):,} | Test: {len(X_test):,}")
-    return X_cal, X_test, data_path, y_cal, y_test
+    mo.md(f"**Datos** — Calibración: {len(X_cal):,} | Test: {len(X_test):,}")
+    return data_path, feature_cols, X_cal, y_cal, X_test, y_test
 
 
+# ---------------------------------------------------------------------------
+# 4. MODELO (carga desde MLflow)
+# ---------------------------------------------------------------------------
 @app.cell
 def _(cfg, mlflow, mo):
     _experiment = mlflow.get_experiment_by_name(cfg.experiment.name)
@@ -79,15 +102,15 @@ def _(cfg, mlflow, mo):
     model_run_id = _runs.iloc[0].run_id
     pipeline = mlflow.sklearn.load_model(f"runs:/{model_run_id}/model")
 
-    mo.md(f"Loaded model from run `{model_run_id[:8]}` (`{cfg.experiment.run_name}`)")
+    mo.md(f"**Modelo** — run `{model_run_id[:8]}` (`{cfg.experiment.run_name}`)")
     return model_run_id, pipeline
 
 
+# ---------------------------------------------------------------------------
+# 5. CALIBRACIÓN CONFORMAL
+# ---------------------------------------------------------------------------
 @app.cell
-def _(X_cal, cfg, mo, pipeline, y_cal):
-    from conformalpy.classifier import ConformalClassifier
-    from conformalpy.nonconformity import lac_nonconformity
-
+def _(cfg, pipeline, X_cal, y_cal, ConformalClassifier, lac_nonconformity, mo):
     conf_clf = ConformalClassifier(
         model=pipeline,
         alpha=cfg.conformal.alpha,
@@ -95,336 +118,371 @@ def _(X_cal, cfg, mo, pipeline, y_cal):
         mondrian=True,
     )
     conf_clf.calibrate(X_cal, y_cal)
-    mo.md(f"ConformalClassifier calibrated: α={cfg.conformal.alpha}, Mondrian=True, n_cal={len(X_cal):,}")
+
+    mo.md(f"**Conformal** — α={cfg.conformal.alpha} | Mondrian=True | n_cal={len(X_cal):,}")
     return (conf_clf,)
 
 
+# ---------------------------------------------------------------------------
+# 6. ENCODING + FUNCIÓN DE PREDICCIÓN
+#    Aísla la transformación categórica y define el callable para KernelSHAP.
+# ---------------------------------------------------------------------------
 @app.cell
-def _(X_test, cfg, conf_clf, mo, np, pd, y_test):
+def _(cfg, conf_clf, X_test, y_test, np, pd):
     numeric_cols = list(cfg.data.features.numerical)
     categorical_cols = list(cfg.data.features.categorical)
     all_cols = numeric_cols + categorical_cols
     n_num = len(numeric_cols)
 
-    cat_categories = {col: sorted(X_test[col].dropna().unique()) for col in categorical_cols}
-    cat_to_int = {col: {v: i for i, v in enumerate(cats)} for col, cats in cat_categories.items()}
-    int_to_cat = {col: {i: v for v, i in m.items()} for col, m in cat_to_int.items()}
+    # Mapas de codificación categórica (entero ↔ etiqueta)
+    cat_categories = {
+        col: sorted(X_test[col].dropna().unique()) for col in categorical_cols
+    }
+    cat_to_int = {
+        col: {v: i for i, v in enumerate(cats)}
+        for col, cats in cat_categories.items()
+    }
+    int_to_cat = {
+        col: {i: v for v, i in mapping.items()}
+        for col, mapping in cat_to_int.items()
+    }
 
+    # Matriz completa con categóricas como enteros
+    X_full = np.column_stack([
+        X_test[numeric_cols].values.astype(float),
+        np.column_stack([
+            X_test[col].map(cat_to_int[col]).values for col in categorical_cols
+        ]),
+    ])
+
+    # Muestreo background / explain sin solapamiento
     np.random.seed(cfg.experiment.seed)
-    n_test = len(X_test)
     n_background = int(cfg.shap.n_background)
-    n_explain_target = int(cfg.shap.n_explain)
-
-    if n_background >= n_test:
-        raise ValueError(
-            f"Invalid cfg.shap.n_background={n_background}: must be < n_test={n_test}."
-        )
-    if n_explain_target > (n_test - n_background):
-        raise ValueError(
-            "Invalid cfg.shap.n_explain={}: must be <= n_test - n_background={} "
-            "for sampling without replacement.".format(n_explain_target, n_test - n_background)
-        )
+    n_explain = int(cfg.shap.n_explain)
+    n_test = len(X_test)
 
     background_idx = np.random.choice(n_test, size=n_background, replace=False)
     explain_idx = np.random.choice(
-        np.setdiff1d(np.arange(n_test), background_idx), size=n_explain_target, replace=False
+        np.setdiff1d(np.arange(n_test), background_idx),
+        size=n_explain,
+        replace=False,
     )
-    y_explain = y_test.values[explain_idx]
-    n_explain = len(explain_idx)
 
-    cat_encoded_test = np.column_stack([
-        X_test[col].map(cat_to_int[col]).values for col in categorical_cols
-    ])
-    X_full = np.column_stack([X_test[numeric_cols].values.astype(float), cat_encoded_test])
     X_background = X_full[background_idx]
     X_explain = X_full[explain_idx]
+    X_explain_df = pd.DataFrame(X_explain, columns=all_cols)
+    y_explain = y_test.values[explain_idx]
 
-    def full_pvalue_func(X: np.ndarray) -> np.ndarray:
-        """Decode integer-encoded categorical features and return p-values."""
-        data = {}
-        for i, col in enumerate(numeric_cols):
-            data[col] = X[:, i].astype(float)
+    # Callable: decodifica enteros → DataFrame original y devuelve p-values
+    def predict_p_values(X: np.ndarray) -> np.ndarray:
+        data = {col: X[:, i].astype(float) for i, col in enumerate(numeric_cols)}
         for j, col in enumerate(categorical_cols):
             n_cats = len(cat_categories[col])
             codes = np.round(X[:, n_num + j]).astype(int).clip(0, n_cats - 1)
             data[col] = [int_to_cat[col][c] for c in codes]
         return conf_clf.predict_p_values(pd.DataFrame(data, columns=all_cols))
 
-    n_classes = full_pvalue_func(X_background[:1]).shape[1]
-    X_explain_df = pd.DataFrame(X_explain, columns=all_cols)
+    n_classes = predict_p_values(X_background[:1]).shape[1]
 
-    mo.md(f"""
-**SHAP Setup Complete**
-
-- Background: {len(X_background)} | Explain: {n_explain} | Classes: {n_classes}
-- Features: {len(all_cols)} total ({n_num} numeric, {len(categorical_cols)} categorical)
-    """)
     return (
-        X_background, X_explain, X_explain_df, all_cols,
-        cat_categories, cat_to_int, categorical_cols,
-        full_pvalue_func, int_to_cat, n_classes, n_explain, n_num,
-        numeric_cols, y_explain,
+        numeric_cols, categorical_cols, all_cols, n_num,
+        cat_categories, cat_to_int, int_to_cat,
+        X_full, X_background, X_explain, X_explain_df, y_explain,
+        predict_p_values, n_classes,
     )
 
 
+# ---------------------------------------------------------------------------
+# 7. CÓMPUTO SHAP (con caché)
+# ---------------------------------------------------------------------------
 @app.cell
-def _(EXPERIMENT_DIR, X_background, X_explain, cfg, full_pvalue_func, mo, model_run_id):
-    from dslib.shap_cache import compute_or_load_shap
-
-    shap_kernel = compute_or_load_shap(
-        full_pvalue_func, X_background, X_explain,
-        nsamples=int(cfg.shap.nsamples), model_id=model_run_id,
+def _(
+    cfg, EXPERIMENT_DIR, model_run_id,
+    predict_p_values, X_background, X_explain,
+    compute_or_load_shap, mo,
+):
+    # shape: (n_explain, n_features, n_classes)
+    shap_values = compute_or_load_shap(
+        predict_p_values, X_background, X_explain,
+        nsamples=int(cfg.shap.nsamples),
+        model_id=model_run_id,
         cache_dir=EXPERIMENT_DIR / "cache",
     )
-    # shape: (n_samples, n_features, n_classes)
-    mo.md(f"KernelSHAP complete. Array shape: `{shap_kernel.shape}`")
-    return (shap_kernel,)
+
+    mo.md(f"**KernelSHAP** — forma: `{shap_values.shape}` (muestras × features × clases)")
+    return (shap_values,)
 
 
+# ---------------------------------------------------------------------------
+# 8. VALORES DERIVADOS + IMPORTANCIA
+#    Todo el álgebra SHAP en un único lugar. Se exporta una vez.
+# ---------------------------------------------------------------------------
 @app.cell
-def _(X_explain, full_pvalue_func, mo, n_classes, n_explain, np, shap_kernel, y_explain):
-    from conformalpy.explainability import derive_margin_shap, derive_confidence_shap
+def _(
+    shap_values, predict_p_values, X_explain,
+    derive_margin_shap, derive_confidence_shap,
+    n_classes, n_explain, np, y_explain,
+):
+    shap_per_class = [shap_values[:, :, k] for k in range(n_classes)]
+    p_values = predict_p_values(X_explain)
 
-    shap_per_class = [shap_kernel[:, :, k] for k in range(n_classes)]
-    p_values_explain = full_pvalue_func(X_explain)
-
-    # Binary: margin = p_true - p_false
+    # Margin: SHAP(p_true) - SHAP(p_false) — binario
     shap_p_true = np.array([shap_per_class[int(y_explain[i])][i] for i in range(n_explain)])
     shap_p_false = np.array([shap_per_class[1 - int(y_explain[i])][i] for i in range(n_explain)])
     shap_margin = derive_margin_shap(shap_p_true, shap_p_false)
 
-    max_class = np.argmax(p_values_explain, axis=1)
+    # Confidence y credibility
+    max_class = np.argmax(p_values, axis=1)
     shap_credibility = np.array([shap_per_class[max_class[i]][i] for i in range(n_explain)])
-    shap_confidence = derive_confidence_shap(shap_per_class, p_values_explain)
+    shap_confidence = derive_confidence_shap(shap_per_class, p_values)
 
-    mo.md(f"Derived SHAP targets: margin {shap_margin.shape}, confidence {shap_confidence.shape}, credibility {shap_credibility.shape}")
-    return (
-        derive_confidence_shap, derive_margin_shap, max_class, p_values_explain,
-        shap_confidence, shap_credibility, shap_margin,
-        shap_p_false, shap_p_true, shap_per_class,
+    # Importancia media |SHAP| por feature (se usa en múltiples celdas downstream)
+    shap_derived = {
+        **{f"pval_{k}": shap_per_class[k] for k in range(n_classes)},
+        "margin": shap_margin,
+        "confidence": shap_confidence,
+        "credibility": shap_credibility,
+    }
+    importance = {
+        name: np.abs(vals).mean(axis=0) for name, vals in shap_derived.items()
+    }
+
+    return shap_derived, importance, p_values, shap_margin, shap_confidence, shap_credibility
+
+
+# ---------------------------------------------------------------------------
+# 9. CONTROLES DE INTERACTIVIDAD
+# ---------------------------------------------------------------------------
+@app.cell
+def _(shap_derived, n_classes, mo):
+    metric_options = list(shap_derived.keys())
+    class_options = ["all"] + [str(k) for k in range(n_classes)]
+
+    ui_metric = mo.ui.dropdown(
+        options=metric_options,
+        value="margin",
+        label="Métrica SHAP",
+    )
+    ui_class = mo.ui.dropdown(
+        options=class_options,
+        value="all",
+        label="Clase verdadera",
+    )
+    ui_plot_type = mo.ui.dropdown(
+        options=["beeswarm", "dependence_numeric", "dependence_categorical",
+                 "signed_importance", "heatmap_per_class"],
+        value="beeswarm",
+        label="Tipo de plot",
     )
 
-
-@app.cell
-def _(X_explain_df, all_cols, mo, n_classes, plt, shap, shap_per_class, y_explain):
-    figs_beeswarm_pv = {}
-
-    def _beeswarm(shap_vals, feature_df, title: str):
-        plt.figure(figsize=(8, 5))
-        shap.summary_plot(
-            shap_vals, feature_df, feature_names=all_cols, plot_type="dot", show=False,
-        )
-        fig = plt.gcf()
-        fig.axes[0].set_title(title, pad=8)
-        plt.tight_layout()
-        return fig
-
-    for _k in range(n_classes):
-        figs_beeswarm_pv[f"p{_k}_all"] = _beeswarm(
-            shap_per_class[_k], X_explain_df, f"SHAP Beeswarm — P-value class {_k} (all)"
-        )
-        for _j in range(n_classes):
-            _mask = y_explain == _j
-            figs_beeswarm_pv[f"p{_k}_class{_j}"] = _beeswarm(
-                shap_per_class[_k][_mask],
-                X_explain_df[_mask].reset_index(drop=True),
-                f"SHAP Beeswarm — P-value class {_k} | true={_j}",
-            )
-
-    mo.md(f"Beeswarm p-values: {len(figs_beeswarm_pv)} figures generated.")
-    return (figs_beeswarm_pv,)
+    mo.hstack([ui_metric, ui_class, ui_plot_type], justify="start")
+    return ui_metric, ui_class, ui_plot_type
 
 
+# ---------------------------------------------------------------------------
+# 10. VISUALIZACIÓN REACTIVA
+#     Una sola celda, un solo punto de entrada. Reacciona a los tres dropdowns.
+# ---------------------------------------------------------------------------
 @app.cell
 def _(
-    X_explain_df, all_cols, mo, n_classes, plt, shap,
-    shap_confidence, shap_credibility, shap_margin, y_explain,
+    ui_metric, ui_class, ui_plot_type,
+    shap_derived, importance, X_explain_df,
+    all_cols, numeric_cols, categorical_cols,
+    cat_categories, int_to_cat,
+    y_explain, n_classes,
+    plot_shap_beeswarm, make_dependence_grid,
+    plot_shap_dependence_numeric, plot_shap_dependence_categorical,
+    plot_signed_importance_by_class, plot_signed_importance_heatmap,
+    np, plt, mo,
 ):
-    figs_beeswarm_derived = {}
+    _metric = ui_metric.value
+    _class_filter = ui_class.value
+    _plot_type = ui_plot_type.value
+    _class_names = {0: "<=50K", 1: ">50K"}
 
-    def _beeswarm_d(shap_vals, feature_df, title: str):
-        plt.figure(figsize=(8, 5))
-        shap.summary_plot(
-            shap_vals, feature_df, feature_names=all_cols, plot_type="dot", show=False,
-        )
-        fig = plt.gcf()
-        fig.axes[0].set_title(title, pad=8)
-        plt.tight_layout()
-        return fig
+    _shap_vals = shap_derived[_metric]
 
-    figs_beeswarm_derived["margin_all"] = _beeswarm_d(shap_margin, X_explain_df, "SHAP Beeswarm — Margin (all)")
-    figs_beeswarm_derived["confidence_all"] = _beeswarm_d(shap_confidence, X_explain_df, "SHAP Beeswarm — Confidence (all)")
-    figs_beeswarm_derived["credibility_all"] = _beeswarm_d(shap_credibility, X_explain_df, "SHAP Beeswarm — Credibility (all)")
-
-    for _k in range(n_classes):
+    # Filtro por clase verdadera
+    if _class_filter == "all":
+        _mask = np.ones(len(y_explain), dtype=bool)
+        _title_suffix = "todas las clases"
+    else:
+        _k = int(_class_filter)
         _mask = y_explain == _k
-        _sub = X_explain_df[_mask].reset_index(drop=True)
-        figs_beeswarm_derived[f"margin_class{_k}"] = _beeswarm_d(
-            shap_margin[_mask], _sub, f"SHAP Beeswarm — Margin | true={_k}"
-        )
-        figs_beeswarm_derived[f"confidence_class{_k}"] = _beeswarm_d(
-            shap_confidence[_mask], _sub, f"SHAP Beeswarm — Confidence | true={_k}"
-        )
-        figs_beeswarm_derived[f"credibility_class{_k}"] = _beeswarm_d(
-            shap_credibility[_mask], _sub, f"SHAP Beeswarm — Credibility | true={_k}"
+        _title_suffix = f"true={_class_names.get(_k, _k)}"
+
+    _shap_filtered = _shap_vals[_mask]
+    _X_filtered = X_explain_df[_mask].reset_index(drop=True)
+    _y_filtered = y_explain[_mask]
+
+    # ---- Generación del plot según tipo ----
+    if _plot_type == "beeswarm":
+        fig = plot_shap_beeswarm(
+            _shap_filtered, _X_filtered,
+            feature_names=all_cols,
+            title=f"Beeswarm — {_metric} | {_title_suffix}",
         )
 
-    mo.md(f"Beeswarm derived: {len(figs_beeswarm_derived)} figures generated.")
-    return (figs_beeswarm_derived,)
+    elif _plot_type == "dependence_numeric":
+        _imp = importance[_metric]
+        _top_idx = np.argsort(-_imp[:len(numeric_cols)])[:4]
+        _top_cols = [numeric_cols[i] for i in _top_idx]
+        fig, _axes_pairs = make_dependence_grid(len(_top_cols), ncols=2, figsize=(12, 10))
+        for _i, _col in enumerate(_top_cols):
+            _col_i = numeric_cols.index(_col)
+            plot_shap_dependence_numeric(
+                _axes_pairs[_i][0], _X_filtered[_col].values,
+                _shap_filtered[:, _col_i], _y_filtered,
+                _col, shap_label=_metric, proportion_ax=_axes_pairs[_i][1],
+            )
+        fig.suptitle(f"Dependencia numérica — {_metric} | {_title_suffix}", fontsize=12)
+        fig.tight_layout()
+
+    elif _plot_type == "dependence_categorical":
+        _n_num = len(numeric_cols)
+        _imp = importance[_metric]
+        _top_idx = np.argsort(-_imp[_n_num:])[:4]
+        _top_cols = [categorical_cols[j] for j in _top_idx]
+        _top_glob = [_n_num + j for j in _top_idx]
+        _ncols = min(2, len(_top_cols))
+        _nrows = max(1, (len(_top_cols) + 1) // 2)
+        fig, _axes_pairs = make_dependence_grid(
+            len(_top_cols), ncols=_ncols, figsize=(7 * _ncols, 5 * _nrows)
+        )
+        for _jj, (_col, _feat_g) in enumerate(zip(_top_cols, _top_glob)):
+            _n_cats = len(cat_categories[_col])
+            _labels = [int_to_cat[_col][c] for c in range(_n_cats)]
+            plot_shap_dependence_categorical(
+                _axes_pairs[_jj][0], _X_filtered[_col].values.astype(int),
+                _shap_filtered[:, _feat_g], _y_filtered,
+                _labels, _col, shap_label=_metric,
+                proportion_ax=_axes_pairs[_jj][1],
+            )
+        fig.suptitle(f"Dependencia categórica — {_metric} | {_title_suffix}", fontsize=12)
+        fig.tight_layout()
+
+    elif _plot_type == "signed_importance":
+        fig = plot_signed_importance_by_class(
+            _shap_filtered, _y_filtered, all_cols,
+            class_names=_class_names,
+            title=f"Importancia firmada — {_metric} | {_title_suffix}",
+        )
+
+    elif _plot_type == "heatmap_per_class":
+        fig = plot_signed_importance_heatmap(
+            _shap_filtered, _y_filtered, all_cols,
+            class_names=_class_names,
+            title=f"Heatmap por clase — {_metric} | {_title_suffix}",
+        )
+
+    mo.mpl.interactive(fig)
+    return (fig,)
 
 
+# ---------------------------------------------------------------------------
+# 11. IMPORTANCIA GLOBAL (estático, siempre visible)
+# ---------------------------------------------------------------------------
 @app.cell
-def _(
-    X_explain_df, all_cols, cat_categories, categorical_cols,
-    int_to_cat, mo, np, numeric_cols, plt, shap_margin, y_explain,
-):
-    _importance = np.abs(shap_margin).mean(axis=0)
+def _(importance, all_cols, numeric_cols, n_classes, shap_derived, np, plt, sns, mo):
+    import seaborn as sns  # noqa: F401 — necesario aquí
 
-    # Top-4 numeric by importance
-    _top_num_local = sorted(range(len(numeric_cols)), key=lambda i: -_importance[i])[:4]
-    _top_num_cols = [numeric_cols[i] for i in _top_num_local]
-
-    # Top-4 categorical by importance (or all if fewer than 4)
-    _cat_start = len(numeric_cols)
-    _top_cat_local = sorted(range(len(categorical_cols)), key=lambda j: -_importance[_cat_start + j])[:min(4, len(categorical_cols))]
-    _top_cat_cols = [categorical_cols[j] for j in _top_cat_local]
-    _top_cat_glob_idx = [_cat_start + j for j in _top_cat_local]
-
-    from conformalpy.shap import (
-        make_dependence_grid,
-        plot_shap_dependence_categorical,
-        plot_shap_dependence_numeric,
-    )
-
-    # Numeric 2×2 dependence (top-4)
-    fig_dep_margin_num, _axes_pairs_num = make_dependence_grid(len(_top_num_cols), ncols=2, figsize=(12, 10))
-    for _i, _col in enumerate(_top_num_cols):
-        _scatter_ax, _prop_ax = _axes_pairs_num[_i]
-        _col_i = numeric_cols.index(_col)
-        plot_shap_dependence_numeric(
-            _scatter_ax, X_explain_df[_col].values, shap_margin[:, _col_i],
-            y_explain, _col, shap_label="margin", proportion_ax=_prop_ax,
-        )
-    fig_dep_margin_num.suptitle("SHAP(Margin) Dependence — Top-4 Numeric Features", fontsize=12)
-    fig_dep_margin_num.tight_layout()
-
-    # Categorical grid (dynamic size)
-    _n_top_c = len(_top_cat_cols)
-    _cat_ncols = min(2, _n_top_c)
-    _cat_nrows = max(1, (_n_top_c + 1) // 2)
-    fig_dep_margin_cat, _axes_pairs_cat = make_dependence_grid(
-        _n_top_c, ncols=_cat_ncols, figsize=(7 * _cat_ncols, 5 * _cat_nrows)
-    )
-    for _jj, (_col, _feat_g) in enumerate(zip(_top_cat_cols, _top_cat_glob_idx)):
-        _scatter_ax, _prop_ax = _axes_pairs_cat[_jj]
-        _n_cats = len(cat_categories[_col])
-        _unique_labels = [int_to_cat[_col][c] for c in range(_n_cats)]
-        _int_codes = X_explain_df[_col].values.astype(int)
-        plot_shap_dependence_categorical(
-            _scatter_ax, _int_codes, shap_margin[:, _feat_g],
-            y_explain, _unique_labels, _col, shap_label="margin", proportion_ax=_prop_ax,
-        )
-    fig_dep_margin_cat.suptitle("SHAP(Margin) Dependence — Top Categorical Features", fontsize=12)
-    fig_dep_margin_cat.tight_layout()
-
-    mo.md("Dependence plots (margin) generated.")
-    return fig_dep_margin_cat, fig_dep_margin_num
-
-
-@app.cell
-def _(
-    all_cols, categorical_cols, mo, n_classes, np, numeric_cols, plt,
-    shap_confidence, shap_credibility, shap_margin, shap_per_class, sns,
-):
-    _importance = np.abs(shap_margin).mean(axis=0)
-    _sorted_idx = np.argsort(-_importance)
+    # Bar chart: importancia media del margin
+    _imp_margin = importance["margin"]
+    _sorted_idx = np.argsort(-_imp_margin)
     _colors = [
         "steelblue" if all_cols[i] in numeric_cols else "darkorange"
         for i in _sorted_idx
     ]
+    from matplotlib.patches import Patch
 
-    fig_importance, _ax_imp = plt.subplots(figsize=(8, 5))
-    _ax_imp.barh(
+    fig_bar, ax_bar = plt.subplots(figsize=(8, 5))
+    ax_bar.barh(
         [all_cols[i] for i in _sorted_idx[::-1]],
-        _importance[_sorted_idx[::-1]],
+        _imp_margin[_sorted_idx[::-1]],
         color=_colors[::-1],
     )
-    _ax_imp.set_xlabel("Mean |SHAP(margin)|")
-    _ax_imp.set_title("Feature Importance — Margin SHAP")
-    from matplotlib.patches import Patch
-    _ax_imp.legend(handles=[
-        Patch(color="steelblue", label="Numeric"),
-        Patch(color="darkorange", label="Categorical"),
+    ax_bar.set_xlabel("Mean |SHAP(margin)|")
+    ax_bar.set_title("Importancia global — Margin")
+    ax_bar.legend(handles=[
+        Patch(color="steelblue", label="Numérica"),
+        Patch(color="darkorange", label="Categórica"),
     ], loc="lower right")
-    plt.tight_layout()
+    fig_bar.tight_layout()
 
-    _metrics = shap_per_class + [shap_margin, shap_confidence, shap_credibility]
-    _metric_names = [f"P-val\nclass {k}" for k in range(n_classes)] + ["Margin", "Confidence", "Credibility"]
-    _heatmap_data = np.column_stack([np.abs(m).mean(axis=0) for m in _metrics])
+    # Heatmap: importancia normalizada por métrica
+    _metric_names = [f"P-val {k}" for k in range(n_classes)] + ["Margin", "Confidence", "Credibility"]
+    _heatmap_data = np.column_stack([importance[k] for k in shap_derived])
     _heatmap_norm = _heatmap_data / (_heatmap_data.sum(axis=0) + 1e-10)
 
-    fig_heatmap, _ax_hm = plt.subplots(figsize=(9, 6))
+    fig_heat, ax_heat = plt.subplots(figsize=(9, 6))
     sns.heatmap(
-        _heatmap_norm, ax=_ax_hm,
+        _heatmap_norm, ax=ax_heat,
         xticklabels=_metric_names, yticklabels=all_cols,
         annot=True, fmt=".2f", cmap="YlOrRd",
     )
-    _ax_hm.set_title("Normalized Feature Importance Across SHAP Targets")
-    _ax_hm.set_xlabel("Metric")
-    _ax_hm.set_ylabel("Feature")
-    plt.tight_layout()
+    ax_heat.set_title("Importancia normalizada por métrica SHAP")
+    ax_heat.set_xlabel("Métrica")
+    ax_heat.set_ylabel("Feature")
+    fig_heat.tight_layout()
 
-    mo.md("Feature importance and heatmap generated.")
-    return fig_heatmap, fig_importance
+    mo.vstack([
+        mo.md("### Importancia global"),
+        mo.hstack([mo.mpl.interactive(fig_bar), mo.mpl.interactive(fig_heat)]),
+    ])
+    return fig_bar, fig_heat
 
 
+# ---------------------------------------------------------------------------
+# 12. LOGGING MLFLOW
+#     Celda final. Genera todas las combinaciones para el artefacto.
+#     No mezcla cómputo ni display — solo logging.
+# ---------------------------------------------------------------------------
 @app.cell
-def _(all_cols, mo, n_classes, np, plt, shap_confidence, shap_credibility, shap_margin, shap_per_class, y_explain):
-    from conformalpy.shap import plot_signed_importance_by_class, plot_signed_importance_heatmap
-
-    _class_names = {0: "<=50K", 1: ">50K"}
-
-    _targets = {}
-    for _k in range(n_classes):
-        _targets[f"pval_{_k}"] = shap_per_class[_k]
-    _targets["margin"] = shap_margin
-    _targets["confidence"] = shap_confidence
-    _targets["credibility"] = shap_credibility
-
-    figs_signed_importance = {}
-    for _name, _shap_vals in _targets.items():
-        figs_signed_importance[_name] = plot_signed_importance_by_class(
-            _shap_vals, y_explain, all_cols,
-            class_names=_class_names,
-            title=f"Signed SHAP Importance — {_name}",
-        )
-
-    figs_heatmap_per_class = {}
-    for _name, _shap_vals in _targets.items():
-        figs_heatmap_per_class[_name] = plot_signed_importance_heatmap(
-            _shap_vals, y_explain, all_cols,
-            class_names=_class_names,
-            title=f"Per-Class SHAP Heatmap — {_name}",
-        )
-
-    mo.md(f"Signed importance: {len(figs_signed_importance)} figures | Heatmaps: {len(figs_heatmap_per_class)} figures")
-    return figs_heatmap_per_class, figs_signed_importance, np, plt
+def _(
+    cfg, data_path, mlflow_config,
+    shap_derived, importance,
+    X_background, X_explain, X_explain_df,
+    all_cols, numeric_cols, categorical_cols,
+    cat_categories, int_to_cat,
+    y_explain, n_classes,
+    fig_bar, fig_heat,
+    plot_shap_beeswarm, make_dependence_grid,
+    plot_shap_dependence_numeric, plot_shap_dependence_categorical,
+    plot_signed_importance_by_class, plot_signed_importance_heatmap,
+    OmegaConf, mlflow, tracked_run,
+    np, plt, mo,
+):
+    _log_button = mo.ui.run_button(label="Registrar en MLflow")
+    mo.vstack([mo.md("### Logging MLflow"), _log_button])
+    return (_log_button,)
 
 
 @app.cell
 def _(
-    OmegaConf, X_background, X_explain, all_cols, categorical_cols, cfg, data_path,
-    fig_dep_margin_cat, fig_dep_margin_num,
-    fig_heatmap, fig_importance,
-    figs_beeswarm_derived, figs_beeswarm_pv,
-    figs_heatmap_per_class, figs_signed_importance,
-    mlflow, mlflow_config, mo, numeric_cols, plt,
+    _log_button,
+    cfg, data_path, mlflow_config,
+    shap_derived, importance,
+    X_background, X_explain, X_explain_df,
+    all_cols, numeric_cols, categorical_cols,
+    cat_categories, int_to_cat,
+    y_explain, n_classes,
+    fig_bar, fig_heat,
+    plot_shap_beeswarm, make_dependence_grid,
+    plot_shap_dependence_numeric, plot_shap_dependence_categorical,
+    plot_signed_importance_by_class, plot_signed_importance_heatmap,
+    OmegaConf, mlflow, tracked_run,
+    np, plt, mo,
 ):
-    from dslib.tracking import tracked_run
+    if not _log_button.value:
+        mo.stop(True, mo.md("Pulsa el botón para registrar."))
 
+    _class_names = {0: "<=50K", 1: ">50K"}
     _config_dict = OmegaConf.to_container(cfg, resolve=True)
+    _n_num = len(numeric_cols)
 
-    with tracked_run(_config_dict, data_path, cfg.experiment.name, run_name="adult-shap-analysis", mlflow_config=mlflow_config):
+    with tracked_run(_config_dict, data_path, cfg.experiment.name,
+                     run_name="adult-shap-analysis", mlflow_config=mlflow_config):
+
         mlflow.log_params({
             "n_background": len(X_background),
             "n_explain": len(X_explain),
@@ -434,46 +492,94 @@ def _(
             "n_features_categorical": len(categorical_cols),
         })
 
-        for _name, _fig in figs_beeswarm_pv.items():
-            mlflow.log_figure(_fig, f"shap/beeswarm/pvalues/{_name}.png", save_kwargs={"bbox_inches": "tight"})
-            plt.close(_fig)
+        # Importancia global
+        for _name, _fig in [("margin_bar", fig_bar), ("normalized_heatmap", fig_heat)]:
+            mlflow.log_figure(_fig, f"shap/importance/{_name}.png",
+                              save_kwargs={"bbox_inches": "tight"})
 
-        for _name, _fig in figs_beeswarm_derived.items():
-            mlflow.log_figure(_fig, f"shap/beeswarm/derived/{_name}.png", save_kwargs={"bbox_inches": "tight"})
-            plt.close(_fig)
+        # Beeswarm, signed importance, heatmap por clase — todas las métricas × clases
+        for _metric, _shap_vals in shap_derived.items():
+            for _class_filter in ["all"] + list(range(n_classes)):
+                _mask = (
+                    np.ones(len(y_explain), dtype=bool)
+                    if _class_filter == "all"
+                    else y_explain == _class_filter
+                )
+                _suffix = "all" if _class_filter == "all" else f"class{_class_filter}"
+                _X_sub = X_explain_df[_mask].reset_index(drop=True)
+                _y_sub = y_explain[_mask]
+                _shap_sub = _shap_vals[_mask]
 
-        mlflow.log_figure(fig_dep_margin_num, "shap/dependence/numeric/margin.png", save_kwargs={"bbox_inches": "tight"})
-        plt.close(fig_dep_margin_num)
-        mlflow.log_figure(fig_dep_margin_cat, "shap/dependence/categorical/margin.png", save_kwargs={"bbox_inches": "tight"})
-        plt.close(fig_dep_margin_cat)
+                _fig_bee = plot_shap_beeswarm(
+                    _shap_sub, _X_sub, feature_names=all_cols,
+                    title=f"Beeswarm — {_metric} | {_suffix}",
+                )
+                mlflow.log_figure(_fig_bee, f"shap/beeswarm/{_metric}/{_suffix}.png",
+                                  save_kwargs={"bbox_inches": "tight"})
+                plt.close(_fig_bee)
 
-        mlflow.log_figure(fig_importance, "shap/importance/margin_importance.png", save_kwargs={"bbox_inches": "tight"})
-        plt.close(fig_importance)
-        mlflow.log_figure(fig_heatmap, "shap/importance/heatmap.png", save_kwargs={"bbox_inches": "tight"})
-        plt.close(fig_heatmap)
+                _fig_si = plot_signed_importance_by_class(
+                    _shap_sub, _y_sub, all_cols,
+                    class_names=_class_names,
+                    title=f"Signed importance — {_metric} | {_suffix}",
+                )
+                mlflow.log_figure(_fig_si, f"shap/signed_importance/{_metric}/{_suffix}.png",
+                                  save_kwargs={"bbox_inches": "tight"})
+                plt.close(_fig_si)
 
-        for _name, _fig in figs_signed_importance.items():
-            mlflow.log_figure(_fig, f"shap/importance/signed/{_name}.png", save_kwargs={"bbox_inches": "tight"})
-            plt.close(_fig)
-        for _name, _fig in figs_heatmap_per_class.items():
-            mlflow.log_figure(_fig, f"shap/importance/heatmap-per-class/{_name}.png", save_kwargs={"bbox_inches": "tight"})
-            plt.close(_fig)
+                _fig_hpc = plot_signed_importance_heatmap(
+                    _shap_sub, _y_sub, all_cols,
+                    class_names=_class_names,
+                    title=f"Heatmap por clase — {_metric} | {_suffix}",
+                )
+                mlflow.log_figure(_fig_hpc, f"shap/heatmap_per_class/{_metric}/{_suffix}.png",
+                                  save_kwargs={"bbox_inches": "tight"})
+                plt.close(_fig_hpc)
 
-    mo.md("""
-## MLflow Logging Complete
+        # Dependencia numérica — top-4 por métrica
+        for _metric, _shap_vals in shap_derived.items():
+            _top_idx = np.argsort(-importance[_metric][:_n_num])[:4]
+            _top_cols = [numeric_cols[i] for i in _top_idx]
+            _fig_dn, _axes_pairs = make_dependence_grid(len(_top_cols), ncols=2, figsize=(12, 10))
+            for _i, _col in enumerate(_top_cols):
+                _col_i = numeric_cols.index(_col)
+                plot_shap_dependence_numeric(
+                    _axes_pairs[_i][0], X_explain_df[_col].values,
+                    _shap_vals[:, _col_i], y_explain,
+                    _col, shap_label=_metric, proportion_ax=_axes_pairs[_i][1],
+                )
+            _fig_dn.suptitle(f"Dependencia numérica — {_metric}", fontsize=12)
+            _fig_dn.tight_layout()
+            mlflow.log_figure(_fig_dn, f"shap/dependence/numeric/{_metric}.png",
+                              save_kwargs={"bbox_inches": "tight"})
+            plt.close(_fig_dn)
 
-Run `adult-shap-analysis` logged to experiment `conformal-correctness-margin`.
+        # Dependencia categórica — top-4 por métrica
+        for _metric, _shap_vals in shap_derived.items():
+            _top_idx = np.argsort(-importance[_metric][_n_num:])[:4]
+            _top_cols = [categorical_cols[j] for j in _top_idx]
+            _top_glob = [_n_num + j for j in _top_idx]
+            _ncols = min(2, len(_top_cols))
+            _nrows = max(1, (len(_top_cols) + 1) // 2)
+            _fig_dc, _axes_pairs = make_dependence_grid(
+                len(_top_cols), ncols=_ncols, figsize=(7 * _ncols, 5 * _nrows)
+            )
+            for _jj, (_col, _feat_g) in enumerate(zip(_top_cols, _top_glob)):
+                _n_cats = len(cat_categories[_col])
+                _labels = [int_to_cat[_col][c] for c in range(_n_cats)]
+                plot_shap_dependence_categorical(
+                    _axes_pairs[_jj][0], X_explain_df[_col].values.astype(int),
+                    _shap_vals[:, _feat_g], y_explain,
+                    _labels, _col, shap_label=_metric,
+                    proportion_ax=_axes_pairs[_jj][1],
+                )
+            _fig_dc.suptitle(f"Dependencia categórica — {_metric}", fontsize=12)
+            _fig_dc.tight_layout()
+            mlflow.log_figure(_fig_dc, f"shap/dependence/categorical/{_metric}.png",
+                              save_kwargs={"bbox_inches": "tight"})
+            plt.close(_fig_dc)
 
-| Artifact group | Contents |
-|---|---|
-| `shap/beeswarm/pvalues/` | Beeswarm figures per p-value class (all + per true class) |
-| `shap/beeswarm/derived/` | Beeswarm for margin, confidence, credibility |
-| `shap/dependence/numeric/` | Top-4 numeric dependence plots |
-| `shap/dependence/categorical/` | Top categorical dependence plots |
-| `shap/importance/` | Bar chart + normalized heatmap |
-| `shap/importance/signed/` | Signed importance by class per target |
-| `shap/importance/heatmap-per-class/` | Per-class heatmap per target |
-    """)
+    mo.callout(mo.md("**MLflow** — run `adult-shap-analysis` registrado correctamente."), kind="success")
     return
 
 

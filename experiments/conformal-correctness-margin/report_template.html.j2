@@ -846,6 +846,15 @@
   </div>
   {% endif %}
 
+  {# p1−p0 beeswarm — full width (binary only) #}
+  {% if ds.shap_artifacts.p1_minus_p0_beeswarm_all %}
+  <div class="figure-block">
+    <img src="data:image/png;base64,{{ ds.shap_artifacts.p1_minus_p0_beeswarm_all }}"
+         alt="p1−p0 SHAP beeswarm (all)">
+    <p class="caption">SHAP beeswarm — p1 − p0 (all samples)</p>
+  </div>
+  {% endif %}
+
   {# Confidence + Credibility beeswarms — 2-col #}
   {% set beeswarm_pair = [] %}
   {% if ds.shap_artifacts.confidence_beeswarm_all %}{% set _ = beeswarm_pair.append(('confidence_beeswarm_all', ds.shap_artifacts.confidence_beeswarm_all, 'SHAP beeswarm — Confidence (all samples)')) %}{% endif %}
@@ -861,13 +870,28 @@
   </div>
   {% endif %}
 
-  {# Dependence plots — 2-col #}
+  {# Dependence plots — 2-col (margin) #}
   {% set dep_pair = [] %}
   {% if ds.shap_artifacts.dependence_numeric_margin %}{% set _ = dep_pair.append((ds.shap_artifacts.dependence_numeric_margin, 'SHAP dependence — numeric features (margin)')) %}{% endif %}
   {% if ds.shap_artifacts.dependence_categorical_margin %}{% set _ = dep_pair.append((ds.shap_artifacts.dependence_categorical_margin, 'SHAP dependence — categorical features (margin)')) %}{% endif %}
   {% if dep_pair | length > 0 %}
   <div class="figure-grid figure-grid-2">
     {% for b64, caption in dep_pair %}
+    <div class="figure-block">
+      <img src="data:image/png;base64,{{ b64 }}" alt="{{ caption }}">
+      <p class="caption">{{ caption }}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# Dependence plots — 2-col (p1−p0, binary only) #}
+  {% set dep_p1p0 = [] %}
+  {% if ds.shap_artifacts.dependence_numeric_p1_minus_p0 %}{% set _ = dep_p1p0.append((ds.shap_artifacts.dependence_numeric_p1_minus_p0, 'SHAP dependence — numeric features (p1 − p0)')) %}{% endif %}
+  {% if ds.shap_artifacts.dependence_categorical_p1_minus_p0 %}{% set _ = dep_p1p0.append((ds.shap_artifacts.dependence_categorical_p1_minus_p0, 'SHAP dependence — categorical features (p1 − p0)')) %}{% endif %}
+  {% if dep_p1p0 | length > 0 %}
+  <div class="figure-grid figure-grid-2">
+    {% for b64, caption in dep_p1p0 %}
     <div class="figure-block">
       <img src="data:image/png;base64,{{ b64 }}" alt="{{ caption }}">
       <p class="caption">{{ caption }}</p>
