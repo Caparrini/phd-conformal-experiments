@@ -34,7 +34,19 @@ def _():
     All 8 features (4 numeric + 4 categorical) included via integer encoding.
     Results logged to MLflow.
     """)
-    return EXPERIMENT_DIR, OmegaConf, cfg, mlflow, mlflow_config, mo, np, pd, plt, shap, sns
+    return (
+        EXPERIMENT_DIR,
+        OmegaConf,
+        cfg,
+        mlflow,
+        mlflow_config,
+        mo,
+        np,
+        pd,
+        plt,
+        shap,
+        sns,
+    )
 
 
 @app.cell
@@ -59,7 +71,7 @@ def _(EXPERIMENT_DIR, cfg):
 
 
 @app.cell
-def _(cfg, mlflow, mlflow_config, mo):
+def _(cfg, mlflow, mo):
     experiment = mlflow.get_experiment_by_name(cfg.experiment.name)
 
     models = mlflow.search_logged_models(
@@ -174,7 +186,15 @@ def _(X_test, cfg, conf_clf, mo, np, pd, y_test):
 
 
 @app.cell
-def _(EXPERIMENT_DIR, X_background, X_explain, cfg, full_pvalue_func, mo, model_id):
+def _(
+    EXPERIMENT_DIR,
+    X_background,
+    X_explain,
+    cfg,
+    full_pvalue_func,
+    mo,
+    model_id,
+):
     from dslib.shap_cache import compute_or_load_shap
 
     shap_kernel = compute_or_load_shap(
@@ -203,6 +223,7 @@ def _(
 
     shap_p0 = shap_kernel[:, :, 0]   # (100, 8)
     shap_p1 = shap_kernel[:, :, 1]   # (100, 8)
+    shap_p_margin = shap_p1-shap_p0
 
     # Compute actual p-values for the explain set
     X_explain_decoded_df = pd.DataFrame(X_explain, columns=all_cols)
@@ -212,6 +233,7 @@ def _(
     shap_p_true  = np.array([shap_kernel[i, :, y_explain[i]]   for i in range(n_explain)])
     shap_p_false = np.array([shap_kernel[i, :, 1 - y_explain[i]] for i in range(n_explain)])
     shap_margin = derive_margin_shap(shap_p_true, shap_p_false)
+
 
     # Credibility: SHAP of the argmax-p-value class per sample
     credibility_class = np.argmax(p_values_explain, axis=1)
@@ -227,11 +249,19 @@ def _(
     |--------|---------|-------|
     | `shap_p0` | SHAP of p-value class 0 | `{shap_p0.shape}` |
     | `shap_p1` | SHAP of p-value class 1 | `{shap_p1.shape}` |
+    | `shap_p_margin` | SHAP p1 - SHAP p0 | `{shap_p_margin.shape}` |
     | `shap_margin` | SHAP(p_true) − SHAP(p_false) | `{shap_margin.shape}` |
     | `shap_credibility` | SHAP of argmax-p class | `{shap_credibility.shape}` |
     | `shap_confidence` | −SHAP of argmin-p class | `{shap_confidence.shape}` |
     """)
-    return shap_confidence, shap_credibility, shap_margin, shap_p0, shap_p1
+    return (
+        shap_confidence,
+        shap_credibility,
+        shap_margin,
+        shap_p0,
+        shap_p1,
+        shap_p_margin,
+    )
 
 
 @app.cell
@@ -280,6 +310,7 @@ def _(
     shap_confidence,
     shap_credibility,
     shap_margin,
+    shap_p_margin,
     y_explain,
 ):
     figs_beeswarm_derived = {}
@@ -294,6 +325,17 @@ def _(
         fig.axes[0].set_title(title, pad=8)
         plt.tight_layout()
         return fig
+
+    # Margin overall + by true class
+    figs_beeswarm_derived["margin_p_all"] = _beeswarm_d(
+        shap_p_margin, X_explain_df, "SHAP Beeswarm — P1 - P0 (all)"
+    )
+    for _k, _label in [(0, "approved"), (1, "default")]:
+        _mask = y_explain == _k
+        figs_beeswarm_derived[f"margin_class{_k}"] = _beeswarm_d(
+            shap_p_margin[_mask], X_explain_df[_mask].reset_index(drop=True),
+            f"SHAP Beeswarm — Margin p1-p0 | true={_label}",
+        )
 
     # Margin overall + by true class
     figs_beeswarm_derived["margin_all"] = _beeswarm_d(
@@ -334,6 +376,53 @@ def _(
 
     mo.md(f"Beeswarm derived metrics: {len(figs_beeswarm_derived)} figures generated.")
     return (figs_beeswarm_derived,)
+
+
+@app.cell
+def _(
+    X_explain_df,
+    cat_categories,
+    categorical_cols,
+    int_to_cat,
+    make_dependence_grid,
+    mo,
+    numeric_cols,
+    plot_shap_dependence_categorical,
+    plot_shap_dependence_numeric,
+    shap_p0,
+    shap_p1,
+    y_explain,
+):
+    # Numeric dependence: p-values — 4×2 grid (features × {p0, p1})
+    fig_dep_pv_num, _axes_pairs_pv = make_dependence_grid(len(numeric_cols) * 2, ncols=2, figsize=(12, 22))
+    for _i, _col in enumerate(numeric_cols):
+        for _k, (_shap_pk, _label) in enumerate([(shap_p0, "P-val class 0"), (shap_p1, "P-val class 1")]):
+            _scatter_ax, _prop_ax = _axes_pairs_pv[_i * 2 + _k]
+            plot_shap_dependence_numeric(
+                _scatter_ax, X_explain_df[_col].values, _shap_pk[:, _i],
+                y_explain, _col, shap_label=_label, proportion_ax=_prop_ax,
+            )
+    fig_dep_pv_num.suptitle("SHAP(P-values) Dependence — Numeric Features", fontsize=12)
+    fig_dep_pv_num.tight_layout()
+
+    # Categorical dependence: p-values — 4×2 grid (features × {p0, p1})
+    fig_dep_pv_cat, _axes_pairs_pv_cat = make_dependence_grid(len(categorical_cols) * 2, ncols=2, figsize=(14, 24))
+    for _j, _col in enumerate(categorical_cols):
+        _n_cats = len(cat_categories[_col])
+        _int_codes = X_explain_df[_col].values.astype(int)
+        _unique_labels = [int_to_cat[_col][c] for c in range(_n_cats)]
+        _feat_idx = len(numeric_cols) + _j
+        for _k, (_shap_pk, _label) in enumerate([(shap_p0, "P-val class 0"), (shap_p1, "P-val class 1")]):
+            _scatter_ax, _prop_ax = _axes_pairs_pv_cat[_j * 2 + _k]
+            plot_shap_dependence_categorical(
+                _scatter_ax, _int_codes, _shap_pk[:, _feat_idx],
+                y_explain, _unique_labels, _col, shap_label=_label, proportion_ax=_prop_ax,
+            )
+    fig_dep_pv_cat.suptitle("SHAP(P-values) Dependence — Categorical Features", fontsize=12)
+    fig_dep_pv_cat.tight_layout()
+
+    mo.md("Dependence plots (p-values) generated.")
+    return fig_dep_pv_cat, fig_dep_pv_num
 
 
 @app.cell
@@ -399,40 +488,36 @@ def _(
     numeric_cols,
     plot_shap_dependence_categorical,
     plot_shap_dependence_numeric,
-    shap_p0,
-    shap_p1,
+    shap_p_margin,
     y_explain,
 ):
-    # Numeric dependence: p-values — 4×2 grid (features × {p0, p1})
-    fig_dep_pv_num, _axes_pairs_pv = make_dependence_grid(len(numeric_cols) * 2, ncols=2, figsize=(12, 22))
+    # Numeric dependence plots — 2×2 grid, each numeric feature vs SHAP(margin)
+    fig_dep_p_margin_num, _axes_pairs_num = make_dependence_grid(len(numeric_cols), ncols=2, figsize=(12, 10))
     for _i, _col in enumerate(numeric_cols):
-        for _k, (_shap_pk, _label) in enumerate([(shap_p0, "P-val class 0"), (shap_p1, "P-val class 1")]):
-            _scatter_ax, _prop_ax = _axes_pairs_pv[_i * 2 + _k]
-            plot_shap_dependence_numeric(
-                _scatter_ax, X_explain_df[_col].values, _shap_pk[:, _i],
-                y_explain, _col, shap_label=_label, proportion_ax=_prop_ax,
-            )
-    fig_dep_pv_num.suptitle("SHAP(P-values) Dependence — Numeric Features", fontsize=12)
-    fig_dep_pv_num.tight_layout()
+        _scatter_ax, _prop_ax = _axes_pairs_num[_i]
+        plot_shap_dependence_numeric(
+            _scatter_ax, X_explain_df[_col].values, shap_p_margin[:, _i],
+            y_explain, _col, shap_label="p margin", proportion_ax=_prop_ax,
+        )
+    fig_dep_p_margin_num.suptitle("SHAP(Margin p1-p0) Dependence — Numeric Features", fontsize=12)
+    fig_dep_p_margin_num.tight_layout()
 
-    # Categorical dependence: p-values — 4×2 grid (features × {p0, p1})
-    fig_dep_pv_cat, _axes_pairs_pv_cat = make_dependence_grid(len(categorical_cols) * 2, ncols=2, figsize=(14, 24))
+    # Categorical dependence plots — jittered strip per category, decoded labels
+    fig_dep_p_margin_cat, _axes_pairs_cat = make_dependence_grid(len(categorical_cols), ncols=2, figsize=(14, 10))
     for _j, _col in enumerate(categorical_cols):
+        _scatter_ax, _prop_ax = _axes_pairs_cat[_j]
         _n_cats = len(cat_categories[_col])
-        _int_codes = X_explain_df[_col].values.astype(int)
         _unique_labels = [int_to_cat[_col][c] for c in range(_n_cats)]
-        _feat_idx = len(numeric_cols) + _j
-        for _k, (_shap_pk, _label) in enumerate([(shap_p0, "P-val class 0"), (shap_p1, "P-val class 1")]):
-            _scatter_ax, _prop_ax = _axes_pairs_pv_cat[_j * 2 + _k]
-            plot_shap_dependence_categorical(
-                _scatter_ax, _int_codes, _shap_pk[:, _feat_idx],
-                y_explain, _unique_labels, _col, shap_label=_label, proportion_ax=_prop_ax,
-            )
-    fig_dep_pv_cat.suptitle("SHAP(P-values) Dependence — Categorical Features", fontsize=12)
-    fig_dep_pv_cat.tight_layout()
+        _int_codes = X_explain_df[_col].values.astype(int)
+        plot_shap_dependence_categorical(
+            _scatter_ax, _int_codes, shap_p_margin[:, len(numeric_cols) + _j],
+            y_explain, _unique_labels, _col, shap_label="margin", proportion_ax=_prop_ax,
+        )
+    fig_dep_p_margin_cat.suptitle("SHAP(Margin p1-p0) Dependence — Categorical Features", fontsize=12)
+    fig_dep_p_margin_cat.tight_layout()
 
-    mo.md("Dependence plots (p-values) generated.")
-    return fig_dep_pv_cat, fig_dep_pv_num
+    mo.md("Dependence plots (margin p1-p0) generated.")
+    return fig_dep_p_margin_cat, fig_dep_p_margin_num
 
 
 @app.cell
@@ -547,7 +632,16 @@ def _(
 
 
 @app.cell
-def _(all_cols, mo, plt, shap_confidence, shap_credibility, shap_margin, shap_p0, shap_p1, y_explain):
+def _(
+    all_cols,
+    mo,
+    shap_confidence,
+    shap_credibility,
+    shap_margin,
+    shap_p0,
+    shap_p1,
+    y_explain,
+):
     from conformalpy.shap import plot_signed_importance_by_class, plot_signed_importance_heatmap
 
     _class_names = {0: "approved", 1: "default"}
@@ -577,7 +671,7 @@ def _(all_cols, mo, plt, shap_confidence, shap_credibility, shap_margin, shap_p0
         )
 
     mo.md(f"Signed importance: {len(figs_signed_importance)} figures | Heatmaps: {len(figs_heatmap_per_class)} figures")
-    return figs_heatmap_per_class, figs_signed_importance, plt
+    return figs_heatmap_per_class, figs_signed_importance
 
 
 @app.cell
@@ -593,6 +687,8 @@ def _(
     fig_dep_cc_num,
     fig_dep_margin_cat,
     fig_dep_margin_num,
+    fig_dep_p_margin_cat,
+    fig_dep_p_margin_num,
     fig_dep_pv_cat,
     fig_dep_pv_num,
     fig_heatmap,
@@ -640,6 +736,8 @@ def _(
         # Dependence — numeric features
         mlflow.log_figure(fig_dep_margin_num, "shap/dependence/numeric/margin.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig_dep_margin_num)
+        mlflow.log_figure(fig_dep_p_margin_num, "shap/dependence/numeric/p_margin.png", save_kwargs={"bbox_inches": "tight"})
+        plt.close(fig_dep_p_margin_num)
         mlflow.log_figure(fig_dep_pv_num, "shap/dependence/numeric/pvalues.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig_dep_pv_num)
         mlflow.log_figure(fig_dep_cc_num, "shap/dependence/numeric/confidence_credibility.png", save_kwargs={"bbox_inches": "tight"})
@@ -648,6 +746,8 @@ def _(
         # Dependence — categorical features
         mlflow.log_figure(fig_dep_margin_cat, "shap/dependence/categorical/margin.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig_dep_margin_cat)
+        mlflow.log_figure(fig_dep_p_margin_cat, "shap/dependence/categorical/p_margin.png", save_kwargs={"bbox_inches": "tight"})
+        plt.close(fig_dep_p_margin_cat)
         mlflow.log_figure(fig_dep_pv_cat, "shap/dependence/categorical/pvalues.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig_dep_pv_cat)
         mlflow.log_figure(fig_dep_cc_cat, "shap/dependence/categorical/confidence_credibility.png", save_kwargs={"bbox_inches": "tight"})

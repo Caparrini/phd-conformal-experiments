@@ -46,7 +46,7 @@ def _(EXPERIMENT_DIR, cfg):
 
 
 @app.cell
-def _(cfg, mlflow_config, mo):
+def _(cfg, mo):
     import mlflow
 
     experiment = mlflow.get_experiment_by_name(cfg.experiment.name)
@@ -71,8 +71,8 @@ def _(
     X_test,
     cfg,
     data_path,
-    mlflow_config,
     mlflow,
+    mlflow_config,
     pipeline,
     y_cal,
     y_test,
@@ -84,7 +84,7 @@ def _(
         categorize_outcomes,
         outcome_summary,
     )
-    from conformalpy.plots import plot_singleton_confusion_matrix
+    # Plotting functions will be imported later in the cell where they are used
     from conformalpy.evaluation import coverage_score
     from conformalpy.nonconformity import lac_nonconformity
     import matplotlib.pyplot as plt
@@ -118,25 +118,19 @@ def _(
         proportions = outcome_stats["proportions"]
         coverage = coverage_score(prediction_sets, y_test)
 
-        # Plots as artifacts
-        fig, axes = plot_singleton_confusion_matrix(
-            prediction_sets,
-            y_test,
-            class_names={0: "approve", 1: "reject"},
-        )
-        mlflow.log_figure(fig, "singleton_confusion_matrix.png", save_kwargs={"bbox_inches": "tight"})
-        plt.close(fig)
+
         import matplotlib.pyplot as plt
         from conformalpy.plots import (
             plot_singleton_confusion_matrix,
             plot_prediction_set_size_distribution,
             plot_set_size_vs_true_label,
+            plot_coverage_by_alpha,
         )
 
         # 1. Singleton confusion matrix
         fig, _ = plot_singleton_confusion_matrix(
             prediction_sets, y_test,
-            class_names={0: "approve", 1: "reject"},
+            class_names={0: "No default", 1: "Default"},
         )
         mlflow.log_figure(fig, "singleton_confusion_matrix.png", save_kwargs={"bbox_inches": "tight"})
         plt.close(fig)
@@ -164,7 +158,6 @@ def _(
         plt.close(fig)
 
         import numpy as np
-        from conformalpy.plots import plot_coverage_by_alpha
 
         alphas = np.arange(0.01, 0.51, 0.01).tolist()
 
@@ -189,7 +182,7 @@ def _(
         import tempfile
         import os
         import json
-    
+
         with tempfile.TemporaryDirectory() as tmpdir:
             filepath = os.path.join(tmpdir, "prediction_sets.json")
             with open(filepath, "w") as f:

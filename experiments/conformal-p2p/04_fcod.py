@@ -45,9 +45,8 @@ def _():
         cfg,
         compute_fcod_smoothed,
         compute_fcod_with_ci,
-        merge_uncertain_outcomes,
         json,
-        math,
+        merge_uncertain_outcomes,
         mlflow,
         mlflow_config,
         mo,
@@ -85,7 +84,7 @@ def _(EXPERIMENT_DIR, cfg, mo):
 
 
 @app.cell
-def _(cfg, json, mlflow, mlflow_config, mo):
+def _(cfg, json, mlflow, mo):
     experiment = mlflow.get_experiment_by_name(cfg.experiment.name)
 
     runs = mlflow.search_runs(
@@ -110,6 +109,7 @@ def _(
     cfg,
     compute_fcod_smoothed,
     compute_fcod_with_ci,
+    merge_uncertain_outcomes,
     mo,
     prediction_sets,
     y_test,
@@ -159,7 +159,13 @@ def _(
     fcod_results_ci_merged = {k: merge_uncertain_outcomes(v) for k, v in fcod_results_ci.items()}
 
     mo.md(f"Computed FCODs for {len(fcod_features)} features")
-    return fcod_features, fcod_results, fcod_results_ci, fcod_results_merged, fcod_results_ci_merged
+    return (
+        fcod_features,
+        fcod_results,
+        fcod_results_ci,
+        fcod_results_ci_merged,
+        fcod_results_merged,
+    )
 
 
 @app.cell
@@ -208,7 +214,7 @@ def _(alpha, fcod_results, plot_stacked_fcod, plt):
 @app.cell
 def _(alpha, fcod_results_ci, plot_multi_feature_fcod, plt):
     def _():
-        fig = plot_multi_feature_fcod(
+        fig, ax = plot_multi_feature_fcod(
             fcod_results_ci,
             outcomes=["SC", "SI"],
             n_cols=2,
@@ -293,7 +299,18 @@ def _(X_test, alpha, plt, prediction_sets, y_test):
 
 
 @app.cell
-def _(X_test, cfg, compute_fcod_smoothed, compute_fcod_with_ci, fcod_features, mo, np, prediction_sets, y_test):
+def _(
+    X_test,
+    cfg,
+    compute_fcod_smoothed,
+    compute_fcod_with_ci,
+    fcod_features,
+    merge_uncertain_outcomes,
+    mo,
+    np,
+    prediction_sets,
+    y_test,
+):
     _y_arr = y_test.values
     unique_classes = np.unique(_y_arr)
 
@@ -348,11 +365,17 @@ def _(X_test, cfg, compute_fcod_smoothed, compute_fcod_with_ci, fcod_features, m
     }
 
     mo.md(f"Computed per-class FCODs for {len(unique_classes)} classes")
-    return fcod_by_class, fcod_ci_by_class, fcod_by_class_merged, fcod_ci_by_class_merged, unique_classes
+    return (
+        fcod_by_class,
+        fcod_by_class_merged,
+        fcod_ci_by_class,
+        fcod_ci_by_class_merged,
+        unique_classes,
+    )
 
 
 @app.cell
-def _(alpha, fcod_ci_by_class, plot_fcod, plt, unique_classes):
+def _(alpha, fcod_ci_by_class: dict, plot_fcod, plt, unique_classes):
     def _():
         for cls in unique_classes:
             results = fcod_ci_by_class[cls]
@@ -369,7 +392,7 @@ def _(alpha, fcod_ci_by_class, plot_fcod, plt, unique_classes):
 
 
 @app.cell
-def _(alpha, fcod_by_class, plot_stacked_fcod, plt, unique_classes):
+def _(alpha, fcod_by_class: dict, plot_stacked_fcod, plt, unique_classes):
     def _():
         for cls in unique_classes:
             results = fcod_by_class[cls]
@@ -386,7 +409,13 @@ def _(alpha, fcod_by_class, plot_stacked_fcod, plt, unique_classes):
 
 
 @app.cell
-def _(alpha, fcod_ci_by_class, plot_multi_feature_fcod, plt, unique_classes):
+def _(
+    alpha,
+    fcod_ci_by_class: dict,
+    plot_multi_feature_fcod,
+    plt,
+    unique_classes,
+):
     def _():
         for cls in unique_classes:
             fig = plot_multi_feature_fcod(
@@ -405,7 +434,13 @@ def _(alpha, fcod_ci_by_class, plot_multi_feature_fcod, plt, unique_classes):
 
 
 @app.cell
-def _(alpha, fcod_ci_by_class, plot_uncertainty_zones, plt, unique_classes):
+def _(
+    alpha,
+    fcod_ci_by_class: dict,
+    plot_uncertainty_zones,
+    plt,
+    unique_classes,
+):
     def _():
         for cls in unique_classes:
             fig, ax = plt.subplots(figsize=(12, 5))
@@ -421,7 +456,16 @@ def _(alpha, fcod_ci_by_class, plot_uncertainty_zones, plt, unique_classes):
 
 
 @app.cell
-def _(X_test, alpha, cat_features, plot_outcome_distribution_by_category, plt, prediction_sets, unique_classes, y_test):
+def _(
+    X_test,
+    alpha,
+    cat_features,
+    plot_outcome_distribution_by_category,
+    plt,
+    prediction_sets,
+    unique_classes,
+    y_test,
+):
     def _():
         _y_arr_cls = y_test.values
         for cls in unique_classes:
@@ -459,19 +503,17 @@ def _(
     cat_features,
     cfg,
     data_path,
-    fcod_by_class,
+    fcod_by_class: dict,
     fcod_by_class_merged,
-    fcod_ci_by_class,
+    fcod_ci_by_class: dict,
     fcod_ci_by_class_merged,
     fcod_results,
     fcod_results_ci,
     fcod_results_ci_merged,
     fcod_results_merged,
-    math,
     mlflow,
     mlflow_config,
     mo,
-    np,
     plot_fcod,
     plot_multi_feature_fcod,
     plot_outcome_distribution_by_category,
@@ -529,7 +571,7 @@ def _(
             plt.close(fig_stacked)
 
             # SC + SI multi-feature grid
-            fig_sc_si = plot_multi_feature_fcod(
+            fig_sc_si, ax_sc_si = plot_multi_feature_fcod(
                 fcod_results_ci, outcomes=["SC", "SI"], n_cols=2,
                 show_ci=True, figsize_per_plot=(6, 4),
             )
@@ -612,7 +654,7 @@ def _(
                 plt.close(_fig_stacked)
 
                 # SC/SI grid
-                _fig_sc_si = plot_multi_feature_fcod(
+                _fig_sc_si, _ax_sc_ci = plot_multi_feature_fcod(
                     _cls_fcod_ci, outcomes=["SC", "SI"], n_cols=2,
                     show_ci=True, figsize_per_plot=(6, 4),
                 )
@@ -651,38 +693,40 @@ def _(
                 plt.close(_fig_cat)
 
             # === Stacked FCOD by class (per feature) ===
-            _fv_by_class = {}
-            for _cls in unique_classes:
-                _cls_mask = _y_arr == _cls
-                _X_cls = X_test[_cls_mask]
-                _fv_by_class[_cls] = {
-                    feat: _X_cls[feat].values for feat in fcod_by_class[_cls]
-                }
+            # _fv_by_class = {}
+            # for _cls in unique_classes:
+            #     _cls_mask = _y_arr == _cls
+            #     _X_cls = X_test[_cls_mask]
+            #     _fv_by_class[_cls] = {
+            #         feat: _X_cls[feat].values for feat in fcod_by_class[_cls]
+            #     }
 
-            _features = list(fcod_by_class[unique_classes[0]].keys())
-            for _feat in _features:
-                _fcod_feat = {c: fcod_by_class[c][_feat] for c in unique_classes}
-                _fv_feat = {c: _fv_by_class[c][_feat] for c in unique_classes}
-                _fig_stacked_cls = plot_stacked_fcod(
-                    {},
-                    fcod_by_class=_fcod_feat,
-                    feature_values_by_class=_fv_feat,
-                    class_names={c: f"Class {c}" for c in unique_classes},
-                    figsize=(6, 4),
-                    show_density=True,
-                    show_std=False,
-                    title=_feat,
-                )
-                _fig_stacked_cls.suptitle(
-                    f"Stacked FCOD by Class — {_feat} (α={alpha})",
-                    fontsize=14, y=1.01,
-                )
-                mlflow.log_figure(
-                    _fig_stacked_cls,
-                    f"by_class_stacked/{_feat}.png",
-                    save_kwargs={"bbox_inches": "tight"},
-                )
-                plt.close(_fig_stacked_cls)
+            # _features = list(fcod_by_class[unique_classes[0]].keys())
+            # for _feat in _features:
+            #     _fcod_feat = {c: fcod_by_class[c][_feat] for c in unique_classes}
+            #     _fv_feat = {c: _fv_by_class[c][_feat] for c in unique_classes}
+            #     _fig_stacked_cls = plot_stacked_fcod(
+            #         fcod_results,
+            #         #fcod_by_class=_fcod_feat,
+            #         #feature_values=_fv_feat,
+            #         #lass_names={c: f"Class {c}" for c in unique_classes},
+            #         #figsize=(6, 4),
+            #         #xlabel=_feat,
+            #         kind="area",
+            #         #show_density=True,
+            #         #show_std=False,
+            #         title=_feat,
+            #     )
+            #     _fig_stacked_cls.suptitle(
+            #         f"Stacked FCOD by Class — {_feat} (α={alpha})",
+            #         fontsize=14, y=1.01,
+            #     )
+            #     mlflow.log_figure(
+            #         _fig_stacked_cls,
+            #         f"by_class_stacked/{_feat}.png",
+            #         save_kwargs={"bbox_inches": "tight"},
+            #     )
+            #     plt.close(_fig_stacked_cls)
 
             # === Merged uncertain outcomes (TS0+TS1 → TS) ===
 

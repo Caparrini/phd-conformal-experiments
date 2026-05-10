@@ -35,4 +35,4 @@ experiment:
 shap:
   n_background: 300
   n_explain: 1000
-  nsamples: 256
+  nsamples: 1024

@@ -4,9 +4,6 @@ __generated_with = "0.20.2"
 app = marimo.App(width="medium")
 
 
-# ---------------------------------------------------------------------------
-# 1. IMPORTS
-# ---------------------------------------------------------------------------
 @app.cell
 def _():
     import marimo as mo
@@ -23,7 +20,6 @@ def _():
     from conformalpy.nonconformity import lac_nonconformity
     from conformalpy.explainability import derive_margin_shap, derive_confidence_shap
     from conformalpy.shap import (
-        plot_shap_beeswarm,
         plot_shap_dependence_numeric,
         plot_shap_dependence_categorical,
         make_dependence_grid,
@@ -36,22 +32,33 @@ def _():
     from dslib.tracking import tracked_run
 
     return (
-        mo, np, pd, plt, mlflow, shap, Path,
-        initialize_config_dir, compose, OmegaConf,
-        ConformalClassifier, lac_nonconformity,
-        derive_margin_shap, derive_confidence_shap,
-        plot_shap_beeswarm, plot_shap_dependence_numeric,
-        plot_shap_dependence_categorical, make_dependence_grid,
-        plot_signed_importance_by_class, plot_signed_importance_heatmap,
-        load_mlflow_config, stratified_split, compute_or_load_shap, tracked_run,
+        ConformalClassifier,
+        OmegaConf,
+        Path,
+        compose,
+        compute_or_load_shap,
+        derive_confidence_shap,
+        derive_margin_shap,
+        initialize_config_dir,
+        lac_nonconformity,
+        load_mlflow_config,
+        make_dependence_grid,
+        mlflow,
+        mo,
+        np,
+        pd,
+        plot_shap_dependence_categorical,
+        plot_shap_dependence_numeric,
+        plot_signed_importance_by_class,
+        plot_signed_importance_heatmap,
+        plt,
+        stratified_split,
+        tracked_run,
     )
 
 
-# ---------------------------------------------------------------------------
-# 2. CONFIG
-# ---------------------------------------------------------------------------
 @app.cell
-def _(Path, initialize_config_dir, compose, load_mlflow_config):
+def _(Path, compose, initialize_config_dir, load_mlflow_config):
     EXPERIMENT_DIR = Path(__file__).parent
     CONFIG_DIR = str(EXPERIMENT_DIR / "config")
 
@@ -60,15 +67,11 @@ def _(Path, initialize_config_dir, compose, load_mlflow_config):
 
     mlflow_config = load_mlflow_config()
     mlflow_config.validate_and_log()
+    return EXPERIMENT_DIR, cfg, mlflow_config
 
-    return cfg, mlflow_config, EXPERIMENT_DIR
 
-
-# ---------------------------------------------------------------------------
-# 3. DATOS
-# ---------------------------------------------------------------------------
 @app.cell
-def _(cfg, EXPERIMENT_DIR, stratified_split, mo):
+def _(EXPERIMENT_DIR, cfg, mo, stratified_split):
     data_path = EXPERIMENT_DIR / cfg.data.file
     feature_cols = list(cfg.data.features.numerical) + list(cfg.data.features.categorical)
 
@@ -84,12 +87,9 @@ def _(cfg, EXPERIMENT_DIR, stratified_split, mo):
     X_test, y_test = splits["test"]
 
     mo.md(f"**Datos** — Calibración: {len(X_cal):,} | Test: {len(X_test):,}")
-    return data_path, feature_cols, X_cal, y_cal, X_test, y_test
+    return X_cal, X_test, data_path, y_cal, y_test
 
 
-# ---------------------------------------------------------------------------
-# 4. MODELO (carga desde MLflow)
-# ---------------------------------------------------------------------------
 @app.cell
 def _(cfg, mlflow, mo):
     _experiment = mlflow.get_experiment_by_name(cfg.experiment.name)
@@ -106,11 +106,8 @@ def _(cfg, mlflow, mo):
     return model_run_id, pipeline
 
 
-# ---------------------------------------------------------------------------
-# 5. CALIBRACIÓN CONFORMAL
-# ---------------------------------------------------------------------------
 @app.cell
-def _(cfg, pipeline, X_cal, y_cal, ConformalClassifier, lac_nonconformity, mo):
+def _(ConformalClassifier, X_cal, cfg, lac_nonconformity, mo, pipeline, y_cal):
     conf_clf = ConformalClassifier(
         model=pipeline,
         alpha=cfg.conformal.alpha,
@@ -123,12 +120,8 @@ def _(cfg, pipeline, X_cal, y_cal, ConformalClassifier, lac_nonconformity, mo):
     return (conf_clf,)
 
 
-# ---------------------------------------------------------------------------
-# 6. ENCODING + FUNCIÓN DE PREDICCIÓN
-#    Aísla la transformación categórica y define el callable para KernelSHAP.
-# ---------------------------------------------------------------------------
 @app.cell
-def _(cfg, conf_clf, X_test, y_test, np, pd):
+def _(X_test, cfg, conf_clf, np, pd, y_test):
     numeric_cols = list(cfg.data.features.numerical)
     categorical_cols = list(cfg.data.features.categorical)
     all_cols = numeric_cols + categorical_cols
@@ -183,23 +176,32 @@ def _(cfg, conf_clf, X_test, y_test, np, pd):
         return conf_clf.predict_p_values(pd.DataFrame(data, columns=all_cols))
 
     n_classes = predict_p_values(X_background[:1]).shape[1]
-
     return (
-        numeric_cols, categorical_cols, all_cols, n_num,
-        cat_categories, cat_to_int, int_to_cat,
-        X_full, X_background, X_explain, X_explain_df, y_explain,
-        predict_p_values, n_classes,
+        X_background,
+        X_explain,
+        X_explain_df,
+        all_cols,
+        cat_categories,
+        categorical_cols,
+        int_to_cat,
+        n_classes,
+        n_explain,
+        numeric_cols,
+        predict_p_values,
+        y_explain,
     )
 
 
-# ---------------------------------------------------------------------------
-# 7. CÓMPUTO SHAP (con caché)
-# ---------------------------------------------------------------------------
 @app.cell
 def _(
-    cfg, EXPERIMENT_DIR, model_run_id,
-    predict_p_values, X_background, X_explain,
-    compute_or_load_shap, mo,
+    EXPERIMENT_DIR,
+    X_background,
+    X_explain,
+    cfg,
+    compute_or_load_shap,
+    mo,
+    model_run_id,
+    predict_p_values,
 ):
     # shape: (n_explain, n_features, n_classes)
     shap_values = compute_or_load_shap(
@@ -213,15 +215,17 @@ def _(
     return (shap_values,)
 
 
-# ---------------------------------------------------------------------------
-# 8. VALORES DERIVADOS + IMPORTANCIA
-#    Todo el álgebra SHAP en un único lugar. Se exporta una vez.
-# ---------------------------------------------------------------------------
 @app.cell
 def _(
-    shap_values, predict_p_values, X_explain,
-    derive_margin_shap, derive_confidence_shap,
-    n_classes, n_explain, np, y_explain,
+    X_explain,
+    derive_confidence_shap,
+    derive_margin_shap,
+    n_classes,
+    n_explain,
+    np,
+    predict_p_values,
+    shap_values,
+    y_explain,
 ):
     shap_per_class = [shap_values[:, :, k] for k in range(n_classes)]
     p_values = predict_p_values(X_explain)
@@ -246,15 +250,11 @@ def _(
     importance = {
         name: np.abs(vals).mean(axis=0) for name, vals in shap_derived.items()
     }
+    return importance, shap_derived
 
-    return shap_derived, importance, p_values, shap_margin, shap_confidence, shap_credibility
 
-
-# ---------------------------------------------------------------------------
-# 9. CONTROLES DE INTERACTIVIDAD
-# ---------------------------------------------------------------------------
 @app.cell
-def _(shap_derived, n_classes, mo):
+def _(mo, n_classes, shap_derived):
     metric_options = list(shap_derived.keys())
     class_options = ["all"] + [str(k) for k in range(n_classes)]
 
@@ -276,24 +276,31 @@ def _(shap_derived, n_classes, mo):
     )
 
     mo.hstack([ui_metric, ui_class, ui_plot_type], justify="start")
-    return ui_metric, ui_class, ui_plot_type
+    return ui_class, ui_metric, ui_plot_type
 
 
-# ---------------------------------------------------------------------------
-# 10. VISUALIZACIÓN REACTIVA
-#     Una sola celda, un solo punto de entrada. Reacciona a los tres dropdowns.
-# ---------------------------------------------------------------------------
 @app.cell
 def _(
-    ui_metric, ui_class, ui_plot_type,
-    shap_derived, importance, X_explain_df,
-    all_cols, numeric_cols, categorical_cols,
-    cat_categories, int_to_cat,
-    y_explain, n_classes,
-    plot_shap_beeswarm, make_dependence_grid,
-    plot_shap_dependence_numeric, plot_shap_dependence_categorical,
-    plot_signed_importance_by_class, plot_signed_importance_heatmap,
-    np, plt, mo,
+    X_explain_df,
+    all_cols,
+    cat_categories,
+    categorical_cols,
+    importance,
+    int_to_cat,
+    make_dependence_grid,
+    mo,
+    np,
+    numeric_cols,
+    plot_shap_beeswarm,
+    plot_shap_dependence_categorical,
+    plot_shap_dependence_numeric,
+    plot_signed_importance_by_class,
+    plot_signed_importance_heatmap,
+    shap_derived,
+    ui_class,
+    ui_metric,
+    ui_plot_type,
+    y_explain,
 ):
     _metric = ui_metric.value
     _class_filter = ui_class.value
@@ -376,14 +383,20 @@ def _(
         )
 
     mo.mpl.interactive(fig)
-    return (fig,)
+    return
 
 
-# ---------------------------------------------------------------------------
-# 11. IMPORTANCIA GLOBAL (estático, siempre visible)
-# ---------------------------------------------------------------------------
 @app.cell
-def _(importance, all_cols, numeric_cols, n_classes, shap_derived, np, plt, sns, mo):
+def _(
+    all_cols,
+    importance,
+    mo,
+    n_classes,
+    np,
+    numeric_cols,
+    plt,
+    shap_derived,
+):
     import seaborn as sns  # noqa: F401 — necesario aquí
 
     # Bar chart: importancia media del margin
@@ -432,48 +445,46 @@ def _(importance, all_cols, numeric_cols, n_classes, shap_derived, np, plt, sns,
     return fig_bar, fig_heat
 
 
-# ---------------------------------------------------------------------------
-# 12. LOGGING MLFLOW
-#     Celda final. Genera todas las combinaciones para el artefacto.
-#     No mezcla cómputo ni display — solo logging.
-# ---------------------------------------------------------------------------
 @app.cell
-def _(
-    cfg, data_path, mlflow_config,
-    shap_derived, importance,
-    X_background, X_explain, X_explain_df,
-    all_cols, numeric_cols, categorical_cols,
-    cat_categories, int_to_cat,
-    y_explain, n_classes,
-    fig_bar, fig_heat,
-    plot_shap_beeswarm, make_dependence_grid,
-    plot_shap_dependence_numeric, plot_shap_dependence_categorical,
-    plot_signed_importance_by_class, plot_signed_importance_heatmap,
-    OmegaConf, mlflow, tracked_run,
-    np, plt, mo,
-):
-    _log_button = mo.ui.run_button(label="Registrar en MLflow")
-    mo.vstack([mo.md("### Logging MLflow"), _log_button])
-    return (_log_button,)
+def _(mo):
+    log_button = mo.ui.run_button(label="Registrar en MLflow")
+    mo.vstack([mo.md("### Logging MLflow"), log_button])
+    return (log_button,)
 
 
 @app.cell
 def _(
-    _log_button,
-    cfg, data_path, mlflow_config,
-    shap_derived, importance,
-    X_background, X_explain, X_explain_df,
-    all_cols, numeric_cols, categorical_cols,
-    cat_categories, int_to_cat,
-    y_explain, n_classes,
-    fig_bar, fig_heat,
-    plot_shap_beeswarm, make_dependence_grid,
-    plot_shap_dependence_numeric, plot_shap_dependence_categorical,
-    plot_signed_importance_by_class, plot_signed_importance_heatmap,
-    OmegaConf, mlflow, tracked_run,
-    np, plt, mo,
+    OmegaConf,
+    X_background,
+    X_explain,
+    X_explain_df,
+    all_cols,
+    cat_categories,
+    categorical_cols,
+    cfg,
+    data_path,
+    fig_bar,
+    fig_heat,
+    importance,
+    int_to_cat,
+    log_button,
+    make_dependence_grid,
+    mlflow,
+    mlflow_config,
+    mo,
+    n_classes,
+    np,
+    numeric_cols,
+    plot_shap_dependence_categorical,
+    plot_shap_dependence_numeric,
+    plot_signed_importance_by_class,
+    plot_signed_importance_heatmap,
+    plt,
+    shap_derived,
+    tracked_run,
+    y_explain,
 ):
-    if not _log_button.value:
+    if not log_button.value:
         mo.stop(True, mo.md("Pulsa el botón para registrar."))
 
     _class_names = {0: "<=50K", 1: ">50K"}
@@ -510,13 +521,13 @@ def _(
                 _y_sub = y_explain[_mask]
                 _shap_sub = _shap_vals[_mask]
 
-                _fig_bee = plot_shap_beeswarm(
-                    _shap_sub, _X_sub, feature_names=all_cols,
-                    title=f"Beeswarm — {_metric} | {_suffix}",
-                )
-                mlflow.log_figure(_fig_bee, f"shap/beeswarm/{_metric}/{_suffix}.png",
-                                  save_kwargs={"bbox_inches": "tight"})
-                plt.close(_fig_bee)
+                # _fig_bee = plot_shap_beeswarm(
+                #    _shap_sub, _X_sub, feature_names=all_cols,
+                #    title=f"Beeswarm — {_metric} | {_suffix}",
+                # )
+                # mlflow.log_figure(_fig_bee, f"shap/beeswarm/{_metric}/{_suffix}.png",
+                #                   save_kwargs={"bbox_inches": "tight"})
+                # plt.close(_fig_bee)
 
                 _fig_si = plot_signed_importance_by_class(
                     _shap_sub, _y_sub, all_cols,
