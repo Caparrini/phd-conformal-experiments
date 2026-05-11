@@ -13,6 +13,9 @@ data:
     train_size: 0.6
     calibration_size: 0.2
     seed: 42
+  fcod:
+    numerical: [lead_time, arrival_date_week_number, adr]
+    categorical: [stays_total_nights, market_segment, customer_type, deposit_type, is_repeated_guest]
 
 model:
   name: "XGBoost"
