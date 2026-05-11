@@ -1,0 +1,41 @@
+data:
+  source: "copa2026"
+  file: "data/cleaned/copa2026.parquet"
+  target: "is_canceled"
+  task: "binary"
+  # Dataset: 4 features numéricas + 4 categóricas (naturaleza).
+  # is_repeated_guest es categórica binaria 0/1 → va a numerical (passthrough):
+  # one-hot sobre una binaria 0/1 es un no-op redundante para XGBoost.
+  features:
+    numerical: [lead_time, arrival_date_week_number, stays_total_nights, adr, is_repeated_guest]
+    categorical: [market_segment, customer_type, deposit_type]
+  splits:
+    train_size: 0.6
+    calibration_size: 0.2
+    seed: 42
+
+model:
+  name: "XGBoost"
+  params:
+    n_estimators: 200
+    max_depth: 6
+    learning_rate: 0.1
+    subsample: 0.8
+    colsample_bytree: 0.8
+    random_state: 42
+    objective: "binary:logistic"
+    eval_metric: "logloss"
+
+conformal:
+  alpha: 0.10
+  method: "lac"
+
+experiment:
+  name: "copa2026"
+  seed: 42
+  run_name: "copa2026-xgboost"
+
+shap:
+  n_background: 300
+  n_explain: 1000
+  nsamples: 1024
