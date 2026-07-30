@@ -1,0 +1,48 @@
+data:
+  source: "globafa2026"
+  file: "data/cleaned/globafa2026.parquet"
+  target: "Default"
+  task: "binary"
+  features:
+    numerical:   [fico_n, dti_n, loan_amnt, revenue]
+    categorical: [emp_length, purpose, home_ownership_n, addr_state]
+  splits:
+    date_column: "issue_d"
+    train_cutoff: "2015-07-31"
+    calibration_cutoff: "2016-06-30"
+  fcod:
+    numerical:   [fico_n, dti_n, loan_amnt, revenue]
+    categorical: [emp_length, purpose, home_ownership_n, addr_state]
+
+model:
+  name: "XGBoost"
+  params:
+    base_score: 0.5
+    booster: "gbtree"
+    colsample_bytree: 0.46
+    gamma: 18
+    learning_rate: 0.077
+    max_depth: 7
+    min_child_weight: 1
+    n_estimators: 288
+    reg_alpha: 0
+    reg_lambda: 1
+    scale_pos_weight: 4.43
+    subsample: 0.728
+    random_state: 42
+    objective: "binary:logistic"
+    eval_metric: "logloss"
+
+conformal:
+  alpha: 0.10
+  method: "lac"
+
+experiment:
+  name: "globafa2026"
+  seed: 42
+  run_name: "globafa2026-xgboost"
+
+shap:
+  n_background: 300
+  n_explain: 1000
+  nsamples: 1024
