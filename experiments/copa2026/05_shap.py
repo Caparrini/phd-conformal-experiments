@@ -82,7 +82,6 @@ def _(EXPERIMENT_DIR, cfg, stratified_split):
     )
     X_cal, y_cal = splits["calibration"]
     X_test, y_test = splits["test"]
-
     return X_cal, X_test, data_path, y_cal, y_test
 
 
@@ -279,8 +278,99 @@ def _(derive_margin_shap, select_class_shap, shap_conformal, y_explain):
     shap_p_true = select_class_shap(shap_conformal, y_explain)       # SHAP de p_true
     shap_p_false = select_class_shap(shap_conformal, 1 - y_explain)  # SHAP de p_false
     shap_margin = derive_margin_shap(shap_p_true, shap_p_false)      # SHAP de (p_true - p_other)
-
     return shap_margin, shap_p0, shap_p1, shap_p_margin
+
+
+@app.cell
+def _(np, plt):
+    import matplotlib.ticker as mticker
+
+    def plot_shap_importance_grouped(
+        shap_vals: np.ndarray,
+        feature_names: list[str],
+        y: np.ndarray,
+        name: str,
+        colors: dict | None = None,
+    ) -> plt.Figure:
+        """
+        Grouped horizontal bar chart: mean(|SHAP|) global + per class.
+
+        Parameters
+        ----------
+        shap_vals     : (n_samples, n_features)
+        feature_names : ordered list matching axis-1 of shap_vals
+        y             : class labels aligned with shap_vals rows
+        name          : metric name used in title
+        colors        : optional dict {label: hex}, falls back to defaults
+        """
+        _COLORS = {"Global": "#78909c", "Class 0": "#ef5350", "Class 1": "#42a5f5"}
+        if colors:
+            _COLORS.update(colors)
+
+        arr = np.asarray(shap_vals)
+        y   = np.asarray(y)
+
+        importances = {"Global": np.mean(np.abs(arr), axis=0)}
+        for cls in sorted(np.unique(y)):
+            mask = y == cls
+            if mask.sum() == 0:
+                continue
+            importances[f"Class {cls}"] = np.mean(np.abs(arr[mask]), axis=0)
+
+        order           = np.argsort(importances["Global"])
+        sorted_features = [feature_names[i] for i in order]
+        n_features      = len(sorted_features)
+        n_groups        = len(importances)
+
+        bar_h  = 0.22
+        gap    = 0.08
+        step   = n_groups * bar_h + gap
+        y_base = np.arange(n_features) * step
+
+        fig, ax = plt.subplots(figsize=(10, max(6, n_features * step * 2.2)))
+        fig.patch.set_facecolor("#f8f9fa")
+        ax.set_facecolor("#f8f9fa")
+
+        for i, (label, imp) in enumerate(importances.items()):
+            sorted_imp = imp[order]
+            offset = (i - (n_groups - 1) / 2) * bar_h
+            ax.barh(
+                y_base + offset, sorted_imp,
+                height=bar_h * 0.92,
+                label=label,
+                color=_COLORS.get(label, f"C{i}"),
+                alpha=0.90, edgecolor="#f8f9fa", linewidth=0.5, zorder=3,
+            )
+            x_max = max(imp.max() for imp in importances.values())
+            for j, v in enumerate(sorted_imp):
+                ax.text(v + x_max * 0.01, y_base[j] + offset,
+                        f"{v:.3f}", va="center", ha="left",
+                        fontsize=7.5, color="#616161")
+
+        ax.set_axisbelow(True)
+        ax.grid(axis="x", which="major", linestyle="--", linewidth=0.6, alpha=0.45, color="#9e9e9e", zorder=0)
+        ax.grid(axis="x", which="minor", linestyle=":",  linewidth=0.3, alpha=0.25, color="#9e9e9e", zorder=0)
+        ax.xaxis.set_minor_locator(mticker.AutoMinorLocator(2))
+
+        for spine in ["top", "right", "left"]:
+            ax.spines[spine].set_visible(False)
+        ax.spines["bottom"].set_color("#bdbdbd")
+        ax.tick_params(which="both", length=0)
+
+        ax.set_yticks(y_base)
+        ax.set_yticklabels(sorted_features, fontsize=10.5, color="#212121")
+        ax.set_xlabel("mean(|SHAP value|)", fontsize=11, color="#424242", labelpad=8)
+        ax.set_title(f"SHAP Feature Importance — {name}",
+                     fontsize=13, fontweight="bold", color="#212121", pad=16, loc="left")
+        ax.text(0, 1.01, "Global importance vs. per-class breakdown",
+                transform=ax.transAxes, fontsize=10, color="#757575")
+        ax.legend(title="Subset", fontsize=10, title_fontsize=9.5,
+                  framealpha=0.95, edgecolor="#e0e0e0", loc="lower right")
+
+        fig.tight_layout(pad=1.4)
+        return fig
+
+    return (plot_shap_importance_grouped,)
 
 
 @app.cell
@@ -303,6 +393,7 @@ def _(
     numeric_cols,
     plot_shap_dependence_categorical,
     plot_shap_dependence_numeric,
+    plot_shap_importance_grouped,
     plt,
     shap,
     shap_classic,
@@ -410,8 +501,8 @@ def _(
         for _shap_vals, _name in [
             (shap_p0,       "p0"),
             (shap_p1,       "p1"),
-            (shap_margin,   "margin"),
-            (shap_p_margin, "p_margin"),
+            (shap_margin,   "Correctness Margin"),
+            (shap_p_margin, "Evidence Margin"),
         ]:
             shap.summary_plot(
                 _shap_vals, X_explain_df,
@@ -425,8 +516,8 @@ def _(
 
         # --- C. Dependence plots: margin y p_margin (top-4 por |SHAP| medio) --- #
         for _shap_vals, _name in [
-            (shap_margin,   "margin"),
-            (shap_p_margin, "p_margin"),
+            (shap_margin,   "Correctness Margin"),
+            (shap_p_margin, "Evidence Margin"),
         ]:
             _imp = np.abs(_shap_vals).mean(axis=0)
 
@@ -478,8 +569,8 @@ def _(
 
         # --- D. Importance bars conformales --- #
         for _shap_vals, _name in [
-            (shap_margin,   "margin"),
-            (shap_p_margin, "p_margin"),
+            (shap_margin,   "Correctness Margin"),
+            (shap_p_margin, "Evidence Margin"),
         ]:
             shap.summary_plot(
                 _shap_vals, X_explain_df,
@@ -491,6 +582,57 @@ def _(
                               save_kwargs={"bbox_inches": "tight"})
             plt.close(_fig)
 
+        # --- D. Importance bars conformales --- #
+        for _shap_vals, _name in [
+            (shap_margin,   "Correctness Margin"),
+            (shap_p_margin, "Evidence Margin"),
+        ]:
+            # Global
+            shap.summary_plot(
+                _shap_vals, X_explain_df,
+                feature_names=all_cols, plot_type="bar", show=False,
+            )
+            _fig = plt.gcf()
+            _fig.axes[0].set_xlabel("mean(|SHAP value|)", fontsize=10)
+            _fig.suptitle(f"SHAP Importance conformal — {_name}", y=1.01)
+            mlflow.log_figure(_fig, f"shap/conformal/importance/{_name}.png",
+                              save_kwargs={"bbox_inches": "tight"})
+            plt.close(_fig)
+
+            # Por clase
+            _shap_arr = np.array(_shap_vals)
+            for cls in sorted(np.unique(y_explain)):
+                mask = np.asarray(y_explain) == cls
+                if mask.sum() == 0:
+                    continue
+                shap.summary_plot(
+                    _shap_arr[mask],
+                    X_explain_df.iloc[np.where(mask)[0]],
+                    feature_names=all_cols, plot_type="bar", show=False,
+                )
+                _fig = plt.gcf()
+                _fig.axes[0].set_xlabel("mean(|SHAP value|)", fontsize=10)
+                _fig.suptitle(
+                    f"SHAP Importance conformal — {_name} | class={cls}", y=1.01
+                )
+                mlflow.log_figure(
+                    _fig,
+                    f"shap/conformal/importance/{_name}_class{cls}.png",
+                    save_kwargs={"bbox_inches": "tight"},
+                )
+                plt.close(_fig)
+
+        # --- SHAP importance grouped (global + per class) --- #mticker
+        for _shap_vals, _name in [
+            (shap_margin,   "Correctness Margin"),
+            (shap_p_margin, "Evidence Margin"),
+        ]:
+            _fig = plot_shap_importance_grouped(
+                np.array(_shap_vals), all_cols, y_explain, _name,
+            )
+            mlflow.log_figure(_fig, f"shap/conformal/importance/{_name}_grouped.png",
+                              save_kwargs={"bbox_inches": "tight", "dpi": 150})
+            plt.close(_fig)
     return
 
 

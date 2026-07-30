@@ -66,7 +66,6 @@ def _():
 
     mlflow_config = load_mlflow_config()
     mlflow_config.validate_and_log()
-
     return (mlflow_config,)
 
 
@@ -286,47 +285,99 @@ def _(alpha, fcod_results_ci, np, plot_uncertainty_zones, plt):
 
 
 @app.cell
-def _(X_test, alpha, math, np, plt, prediction_sets, y_test):
+def _(X_test, alpha, np, plt, prediction_sets, y_test):
     from conformalpy.plots import plot_outcome_distribution_by_category
 
     cat_features = {
-        "stays_total_nights": {"label": "Total Nights",   "top_n": None, "sort_by": "alpha",   "ascending": True},
-        "market_segment":     {"label": "Market Segment", "top_n": None, "sort_by": "sc_rate", "ascending": False},
-        "customer_type":      {"label": "Customer Type",  "top_n": None, "sort_by": "sc_rate", "ascending": False},
-        "deposit_type":       {"label": "Deposit Type",   "top_n": None, "sort_by": "sc_rate", "ascending": False},
-        "is_repeated_guest":  {"label": "Repeated Guest", "top_n": None, "sort_by": "sc_rate", "ascending": False},
+        "stays_total_nights": {"label": "Total Nights",   "top_n": None, "sort_by": "alpha",   "ascending": True,  "figsize": (14, 5), "count_rotation": 90},
+        "market_segment":     {"label": "Market Segment", "top_n": None, "sort_by": "sc_rate", "ascending": False, "figsize": (8, 5),  "count_rotation": 0},
+        "customer_type":      {"label": "Customer Type",  "top_n": None, "sort_by": "sc_rate", "ascending": False, "figsize": (8, 5),  "count_rotation": 0},
+        "deposit_type":       {"label": "Deposit Type",   "top_n": None, "sort_by": "sc_rate", "ascending": False, "figsize": (8, 5),  "count_rotation": 0},
+        "is_repeated_guest":  {"label": "Repeated Guest", "top_n": None, "sort_by": "sc_rate", "ascending": False, "figsize": (8, 5),  "count_rotation": 0},
     }
-    N_CAT_COLS = 3
 
-    def _():
-        n_cat = len(cat_features)
-        n_cat_rows = math.ceil(n_cat / N_CAT_COLS)
-        fig, axes = plt.subplots(n_cat_rows, N_CAT_COLS, figsize=(N_CAT_COLS * 6, n_cat_rows * 5))
-        for i in range(n_cat, n_cat_rows * N_CAT_COLS):
-            axes.flatten()[i].set_visible(False)
-
-        for idx, (feature_name, config) in enumerate(cat_features.items()):
-            ax = axes.flatten()[idx]
-            plot_outcome_distribution_by_category(
-                X_test[feature_name].values,
-                prediction_sets,
-                np.asarray(y_test),
-                ax=ax,
-                category_name=config["label"],
-                top_n=config["top_n"],
-                sort_by=config["sort_by"],
-                ascending=config["ascending"],
-            )
-
-        fig.suptitle(
-            f"Outcome Distribution by Categorical Features (α={alpha})",
-            fontsize=14, y=1.02,
+    def styled_outcome_plot(feature_name, config, X, y, ps, suffix="",
+                            show_title=True, show_legend=True):
+        fig, ax = plt.subplots(figsize=config["figsize"])
+        plot_outcome_distribution_by_category(
+            X[feature_name].values,
+            ps,
+            np.asarray(y),
+            ax=ax,
+            category_name=config["label"],
+            top_n=config["top_n"],
+            sort_by=config["sort_by"],
+            ascending=config["ascending"],
+            count_rotation=config["count_rotation"],
+            show_title=show_title,
+            show_legend=show_legend,
+            legend_loc="upper left",
+            legend_bbox_to_anchor=(1.02, 1.0),
         )
-        plt.tight_layout()
+        if show_title:
+            ax.set_title(f"{config['label']}{suffix} (α={alpha})")
+        fig.tight_layout()
         return fig
 
-    _()
-    return N_CAT_COLS, cat_features, plot_outcome_distribution_by_category
+    category_figs = {
+        feat: styled_outcome_plot(feat, cfg, X_test, y_test, prediction_sets)
+        for feat, cfg in cat_features.items()
+    }
+    category_figs_clean = {
+        feat: styled_outcome_plot(feat, cfg, X_test, y_test, prediction_sets,
+                                  show_title=False, show_legend=False)
+        for feat, cfg in cat_features.items()
+    }
+
+    GRID_FEATURES = ["customer_type", "deposit_type", "market_segment", "is_repeated_guest"]
+
+    def build_category_grid(features, X, y, ps, show_titles=True, show_legend=True,
+                            figsize=(14, 9)):
+        fig, axes = plt.subplots(2, 2, figsize=figsize, sharey=True)
+        flat_axes = axes.flatten()
+        for ax, feat in zip(flat_axes, features):
+            cfg = cat_features[feat]
+            plot_outcome_distribution_by_category(
+                X[feat].values, ps, np.asarray(y),
+                ax=ax,
+                category_name=cfg["label"],
+                top_n=cfg["top_n"],
+                sort_by=cfg["sort_by"],
+                ascending=cfg["ascending"],
+                count_rotation=cfg["count_rotation"],
+                show_title=False,
+                show_legend=False,
+            )
+            ax.set_title(cfg["label"] if show_titles else "")
+        if show_legend:
+            handles, labels = flat_axes[0].get_legend_handles_labels()
+            fig.legend(handles, labels,
+                       loc="upper center", ncol=len(labels),
+                       bbox_to_anchor=(0.5, 1.02),
+                       title="Outcome", frameon=True)
+        fig.tight_layout()
+        return fig
+
+    category_grid_fig = build_category_grid(
+        GRID_FEATURES, X_test, y_test, prediction_sets,
+        show_titles=True, show_legend=True,
+    )
+    category_grid_fig_clean = build_category_grid(
+        GRID_FEATURES, X_test, y_test, prediction_sets,
+        show_titles=False, show_legend=False,
+    )
+    category_figs, category_figs_clean, category_grid_fig, category_grid_fig_clean
+    return (
+        GRID_FEATURES,
+        build_category_grid,
+        cat_features,
+        category_figs,
+        category_figs_clean,
+        category_grid_fig,
+        category_grid_fig_clean,
+        plot_outcome_distribution_by_category,
+        styled_outcome_plot,
+    )
 
 
 @app.cell
@@ -347,6 +398,19 @@ def _(
     unique_classes = np.unique(_y_arr)
     fcod_by_class = {}
     fcod_ci_by_class = {}
+
+    # Shared grid per feature: percentile range computed over all classes so every
+    # class FCOD lives on the same x-axis → identical bar width across all panels.
+    _lo_pct, _hi_pct = FCOD_PARAMS["percentile_range"]
+    _shared_grid_by_feat = {}
+    for _feat, _config in fcod_features.items():
+        _fv_all = X_test[_feat].values
+        if _config["clip"] is not None:
+            _lo, _hi = _config["clip"]
+            _fv_all = _fv_all[(_fv_all >= _lo) & (_fv_all <= _hi)]
+        _grid_min = float(np.percentile(_fv_all, _lo_pct))
+        _grid_max = float(np.percentile(_fv_all, _hi_pct))
+        _shared_grid_by_feat[_feat] = np.linspace(_grid_min, _grid_max, FCOD_PARAMS["n_grid"])
 
     for _cls in unique_classes:
         _cls_idx = np.where(_y_arr == _cls)[0]
@@ -371,7 +435,8 @@ def _(
 
             _fcod = compute_fcod_smoothed(
                 _fv_viz, _ps_viz, _y_viz,
-                **FCOD_PARAMS,
+                grid=_shared_grid_by_feat[_feat],
+                sigma=FCOD_PARAMS["sigma"],
             )
             _fcod["feature_name"] = _config["label"]
             fcod_by_class[_cls][_feat] = _fcod
@@ -383,7 +448,7 @@ def _(
                 n_grid=FCOD_PARAMS["n_grid"],
                 method="bootstrap",
                 random_state=cfg.experiment.seed,
-                percentile_range=FCOD_PARAMS["percentile_range"],
+                grid=_shared_grid_by_feat[_feat],
                 sigma=FCOD_PARAMS["sigma"],
             )
             _fcod_ci["feature_name"] = _config["label"]
@@ -495,17 +560,14 @@ def _(alpha, fcod_ci_by_class, plot_uncertainty_zones, plt, unique_classes):
 
 @app.cell
 def _(
-    N_CAT_COLS,
     X_test,
-    alpha,
     cat_features,
-    math,
     np,
-    plot_outcome_distribution_by_category,
     plt,
     prediction_sets,
     unique_classes,
     y_test,
+    styled_outcome_plot,
 ):
     def _():
         for cls in unique_classes:
@@ -515,28 +577,10 @@ def _(
             _ps_cls = [prediction_sets[i] for i, m in enumerate(_cls_mask) if m]
             _y_cls = _y_arr[_cls_mask]
 
-            n_cat = len(cat_features)
-            n_cat_rows = math.ceil(n_cat / N_CAT_COLS)
-            fig, axes = plt.subplots(n_cat_rows, N_CAT_COLS, figsize=(N_CAT_COLS * 6, n_cat_rows * 5))
-            for i in range(n_cat, n_cat_rows * N_CAT_COLS):
-                axes.flatten()[i].set_visible(False)
-            for idx, (feature_name, config) in enumerate(cat_features.items()):
-                ax = axes.flatten()[idx]
-                plot_outcome_distribution_by_category(
-                    _X_cls[feature_name].values,
-                    _ps_cls,
-                    _y_cls,
-                    ax=ax,
-                    category_name=config["label"],
-                    top_n=config["top_n"],
-                    sort_by=config["sort_by"],
-                    ascending=config["ascending"],
-                )
-            fig.suptitle(
-                f"Outcome Distribution by Category — Class {cls} (α={alpha})",
-                fontsize=14, y=1.02,
-            )
-            plt.tight_layout()
+            for feat, cfg in cat_features.items():
+                fig = styled_outcome_plot(feat, cfg, _X_cls, _y_cls, _ps_cls,
+                                           suffix=f" — Class {cls}")
+                plt.close(fig)
 
     _()
     return
@@ -544,12 +588,15 @@ def _(
 
 @app.cell
 def _(
-    N_CAT_COLS,
     N_COLS,
     OmegaConf,
     X_test,
     alpha,
     cat_features,
+    category_figs,
+    category_figs_clean,
+    category_grid_fig,
+    category_grid_fig_clean,
     cfg,
     data_path,
     fcod_by_class,
@@ -567,7 +614,6 @@ def _(
     np,
     plot_fcod,
     plot_multi_feature_fcod,
-    plot_outcome_distribution_by_category,
     plot_stacked_bars_by_class,
     plot_stacked_fcod,
     plot_uncertainty_zones,
@@ -575,6 +621,7 @@ def _(
     prediction_sets,
     unique_classes,
     y_test,
+    styled_outcome_plot,
 ):
     def _():
         from dslib.tracking import tracked_run
@@ -642,31 +689,37 @@ def _(
             mlflow.log_figure(fig_zones, "uncertainty_zones_lead_time.png", save_kwargs={"bbox_inches": "tight"})
             plt.close(fig_zones)
 
-            # Categorical outcome distributions
-            _n_cat = len(cat_features)
-            _n_cat_rows = math.ceil(_n_cat / N_CAT_COLS)
-            fig_cat, axes = plt.subplots(_n_cat_rows, N_CAT_COLS, figsize=(N_CAT_COLS * 6, _n_cat_rows * 5))
-            for i in range(_n_cat, _n_cat_rows * N_CAT_COLS):
-                axes.flatten()[i].set_visible(False)
-            for idx, (feature_name, config) in enumerate(cat_features.items()):
-                ax = axes.flatten()[idx]
-                plot_outcome_distribution_by_category(
-                    X_test[feature_name].values,
-                    prediction_sets,
-                    np.asarray(y_test),
-                    ax=ax,
-                    category_name=config["label"],
-                    top_n=config["top_n"],
-                    sort_by=config["sort_by"],
-                    ascending=config["ascending"],
+            # Categorical outcome distributions — one artifact per feature
+            for _feat, _fig_cat in category_figs.items():
+                mlflow.log_figure(
+                    _fig_cat,
+                    f"outcome_by_category/{_feat}.png",
+                    save_kwargs={"bbox_inches": "tight"},
                 )
-            fig_cat.suptitle(
-                f"Outcome Distribution by Categorical Features (α={alpha})",
-                fontsize=14, y=1.02,
+                plt.close(_fig_cat)
+
+            # Categorical — clean variants (no title, no legend)
+            for _feat, _fig_cat in category_figs_clean.items():
+                mlflow.log_figure(
+                    _fig_cat,
+                    f"outcome_by_category_clean/{_feat}.png",
+                    save_kwargs={"bbox_inches": "tight"},
+                )
+                plt.close(_fig_cat)
+
+            # Composite 2x2 grid (4 features, shared y-axis)
+            mlflow.log_figure(
+                category_grid_fig,
+                "outcome_by_category_grid.png",
+                save_kwargs={"bbox_inches": "tight"},
             )
-            fig_cat.tight_layout()
-            mlflow.log_figure(fig_cat, "outcome_by_category.png", save_kwargs={"bbox_inches": "tight"})
-            plt.close(fig_cat)
+            plt.close(category_grid_fig)
+            mlflow.log_figure(
+                category_grid_fig_clean,
+                "outcome_by_category_grid_clean.png",
+                save_kwargs={"bbox_inches": "tight"},
+            )
+            plt.close(category_grid_fig_clean)
 
             # === Per-class plots ===
             for _cls in unique_classes:
@@ -740,31 +793,31 @@ def _(
                 mlflow.log_figure(_fig_zones, f"{_prefix}/uncertainty_zones_lead_time.png", save_kwargs={"bbox_inches": "tight"})
                 plt.close(_fig_zones)
 
-                # Categorical
-                _n_cat = len(cat_features)
-                _n_cat_rows = math.ceil(_n_cat / N_CAT_COLS)
-                _fig_cat, _axes_cat = plt.subplots(_n_cat_rows, N_CAT_COLS, figsize=(N_CAT_COLS * 6, _n_cat_rows * 5))
-                for i in range(_n_cat, _n_cat_rows * N_CAT_COLS):
-                    _axes_cat.flatten()[i].set_visible(False)
-                for idx, (feature_name, config) in enumerate(cat_features.items()):
-                    _ax_cat = _axes_cat.flatten()[idx]
-                    plot_outcome_distribution_by_category(
-                        _X_cls[feature_name].values,
-                        _ps_cls,
-                        _y_cls,
-                        ax=_ax_cat,
-                        category_name=config["label"],
-                        top_n=config["top_n"],
-                        sort_by=config["sort_by"],
-                        ascending=config["ascending"],
+                # Categorical — one artifact per feature
+                for _feat_cls, _cfg_cls in cat_features.items():
+                    _fig_cat_cls = styled_outcome_plot(
+                        _feat_cls, _cfg_cls, _X_cls, _y_cls, _ps_cls,
+                        suffix=f" — Class {_cls}",
                     )
-                _fig_cat.suptitle(
-                    f"Outcome Distribution by Category — Class {_cls} (α={alpha})",
-                    fontsize=14, y=1.02,
-                )
-                _fig_cat.tight_layout()
-                mlflow.log_figure(_fig_cat, f"{_prefix}/outcome_by_category.png", save_kwargs={"bbox_inches": "tight"})
-                plt.close(_fig_cat)
+                    mlflow.log_figure(
+                        _fig_cat_cls,
+                        f"{_prefix}/outcome_by_category/{_feat_cls}.png",
+                        save_kwargs={"bbox_inches": "tight"},
+                    )
+                    plt.close(_fig_cat_cls)
+
+                # Categorical — clean variants (no title, no legend)
+                for _feat_cls, _cfg_cls in cat_features.items():
+                    _fig_cat_cls_clean = styled_outcome_plot(
+                        _feat_cls, _cfg_cls, _X_cls, _y_cls, _ps_cls,
+                        show_title=False, show_legend=False,
+                    )
+                    mlflow.log_figure(
+                        _fig_cat_cls_clean,
+                        f"{_prefix}/outcome_by_category_clean/{_feat_cls}.png",
+                        save_kwargs={"bbox_inches": "tight"},
+                    )
+                    plt.close(_fig_cat_cls_clean)
 
             # === Stacked FCOD by class (per feature) ===
             _fv_by_class = {}
@@ -862,6 +915,20 @@ def _(
                 _fig_sd = _result[0].figure if isinstance(_result, tuple) else _result.figure
                 mlflow.log_figure(_fig_sd, f"merged/fcod_stacked_density/{_feature_name}.png", save_kwargs={"bbox_inches": "tight"})
                 plt.close(_fig_sd)
+
+            # Merged per-feature stacked + density — clean variant (no title)
+            for _feature_name, _fcod in fcod_results_merged.items():
+                _result_clean = plot_stacked_fcod(
+                    _fcod,
+                    show_density=True,
+                    density_type="histogram",
+                    feature_values=X_test[_feature_name].values,
+                    xlabel=_fcod["feature_name"],
+                    show_title=False,
+                )
+                _fig_sd_clean = _result_clean[0].figure if isinstance(_result_clean, tuple) else _result_clean.figure
+                mlflow.log_figure(_fig_sd_clean, f"merged/fcod_stacked_density_clean/{_feature_name}.png", save_kwargs={"bbox_inches": "tight"})
+                plt.close(_fig_sd_clean)
 
             # Merged per-feature FCOD + density
             for _feature_name, _fcod in fcod_results_ci_merged.items():
