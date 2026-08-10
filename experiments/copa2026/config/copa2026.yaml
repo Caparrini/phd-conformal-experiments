@@ -3,7 +3,7 @@ data:
   file: "data/cleaned/copa2026.parquet"
   target: "is_canceled"
   task: "binary"
-  # Dataset: 4 features numéricas + 4 categóricas (naturaleza).
+  # Dataset: 4 numéricas continuas + 1 binaria (is_repeated_guest) + 3 categóricas.
   # is_repeated_guest es categórica binaria 0/1 → va a numerical (passthrough):
   # one-hot sobre una binaria 0/1 es un no-op redundante para XGBoost.
   features:

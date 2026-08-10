@@ -206,10 +206,10 @@ def _(
     shap,
 ):
     # --- Classic SHAP via TreeExplainer (exact for tree ensembles) ---
-    # METHODOLOGY: TreeExplainer is EXACT (Lundberg et al. 2018). Output space:
+    # TreeExplainer is exact (Lundberg et al. 2018). Output space:
     # probability via interventional SHAP with X_background (handles dependent
     # features correctly; path-dependent would inflate spurious correlations).
-    # Per-dummy SHAP values aggregated by SUM to per-feature: preserves additivity
+    # Per-dummy SHAP values aggregated by sum to per-feature: preserves additivity
     # by linearity of Shapley values across coalitions.
     _xgb_model = pipeline.named_steps["classifier"]
     _preprocessor = pipeline.named_steps["preprocessor"]
@@ -252,9 +252,9 @@ def _(
         shap_classic[:, _i, 0] = -shap_classic[:, _i, 1]  # exact binary complementarity
 
     # --- Conformal SHAP via KernelExplainer (approximate, step-function output) ---
-    # METHODOLOGY: No tree-based exact method exists because the conformal p-value
-    # F_emp(1 - p_y(x)) is a step function in calibration scores — outside tree
-    # representation. KernelExplainer with nsamples=1024 covers 4× the 2^8=256
+    # No tree-based exact method exists because the conformal p-value
+    # F_emp(1 - p_y(x)) is a step function in calibration scores, outside tree
+    # representation. KernelExplainer with nsamples=1024 covers 4x the 2^8=256
     # unique coalitions for 8 semantic features.
     shap_conformal = compute_or_load_shap(
         predict_p_values_fn, X_background, X_explain,
