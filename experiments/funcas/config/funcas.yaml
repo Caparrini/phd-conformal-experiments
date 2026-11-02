@@ -1,0 +1,95 @@
+experiment:
+  name: "funcas"
+  seed: 42
+  run_name: "funcas-xgboost"
+  conformal_experiment: "funcas-conformal"
+  conformal_run_name: "funcas-mapie"
+  analysis_run_name: "funcas-utilidad"
+
+data:
+  file: "data/cleaned/funcas.parquet"
+  target: "target"
+  class_names: ["No default", "Dudoso", "Default"]
+  features:
+    numerical:   [fico_n, dti_n, loan_amnt, revenue]
+    categorical: [emp_length, purpose, home_ownership_n, addr_state]
+  # Partición aleatoria estratificada, igual en todos los notebooks.
+  split:
+    train_size: 0.6
+    calibration_size: 0.2
+  splits:
+    # Solo para la sección 9 del notebook 03: préstamos "antiguos" (hasta esta
+    # fecha) frente a "nuevos".
+    train_cutoff: "2015-12-31"
+
+# Fuentes de los datos (notebook 01). Necesitan un token de Kaggle.
+kaggle:
+  snapshot_2018: "wordsforthewise/lending-club"
+  snapshot_2018_file: "accepted_2007_to_2018Q4.csv.gz"
+  snapshot_2020: "ethon0426/lending-club-20072020q1"
+
+# Qué préstamos entran y cómo se definen las tres clases (notebook 01).
+population:
+  term_months: 36
+  # La foto es del tercer trimestre de 2020: los préstamos a 36 meses emitidos después de
+  # esta fecha aún no han cerrado (ver notebook 01, sección 4).
+  issued_until: "2017-03-31"
+
+rules:
+  # Evidencias que convierten un préstamo pagado en "dudoso". Las cinco son
+  # registros de Lending Club. extra_interest se calcula y no se usa: ver
+  # notebook 01, sección 6.
+  evidences: [settlement, hardship, late_fee, late_2018, paid_after_maturity]
+  maturity_grace_months: 1
+  extra_interest_tol: 0.01
+
+model:
+  params:
+    booster: "gbtree"
+    colsample_bytree: 0.46
+    gamma: 18
+    learning_rate: 0.077
+    max_depth: 7
+    min_child_weight: 1
+    n_estimators: 288
+    reg_alpha: 0
+    reg_lambda: 1
+    subsample: 0.728
+    random_state: 42
+    objective: "multi:softprob"
+    num_class: 3
+    eval_metric: "mlogloss"
+
+rf:
+  run_name: "funcas-rf-optuna"
+  # Búsqueda con Optuna (TPE) sobre una submuestra estratificada del
+  # entrenamiento. Calibración y test no se tocan. Con 100 pruebas tarda unos
+  # 10 minutos; bájalo para una ejecución rápida.
+  search:
+    scoring: "balanced_accuracy"
+    n_rows: 150000
+    cv_splits: 3
+    n_trials: 100
+    # Los pesos w_dudoso y w_default se buscan como múltiplo del peso
+    # balanceado (n_no_default / n_clase), entre estos dos límites. La
+    # balanced accuracy se maximiza cerca de los pesos balanceados, así que el
+    # rango queda centrado en 1.
+    weight_multiplier: {low: 0.25, high: 4.0}
+    space:
+      n_estimators:     {type: int, low: 50, high: 250}
+      max_depth:        {type: int, low: 4, high: 100}
+      # Hojas de pocos préstamos dan bosques de más de 1 GB (se guardan en
+      # mlartifacts/) y memorizan el entrenamiento.
+      min_samples_leaf: {type: int, low: 10, high: 200, log: true}
+
+# Nivel de confianza de todos los notebooks de conformal (confianza = 1 - alpha).
+conformal:
+  alpha: 0.10
+  alpha_grid: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30]
+
+# Notebook 04.
+analysis:
+  n_resplits: 30
+  n_bootstrap: 100
+  # Margen sobre 1 - alpha por debajo del cual damos la cobertura por incumplida.
+  coverage_tolerance: 0.01
