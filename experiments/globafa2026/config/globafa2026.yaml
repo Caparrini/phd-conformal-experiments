@@ -41,8 +41,28 @@ experiment:
   name: "globafa2026"
   seed: 42
   run_name: "globafa2026-xgboost"
+  # Separate MLflow experiment for downstream robustness/validation notebooks
+  # (06, 07). Keeping them out of "globafa2026" means the most-recent run of
+  # the core pipeline experiment always has a logged model — these notebooks
+  # never call log_model, so mixing them in makes "latest run" resolve to a
+  # model-less run for anyone/anything that doesn't filter by run_name.
+  analysis_experiment_name: "globafa2026-supplementary"
 
 shap:
   n_background: 300
   n_explain: 1000
   nsamples: 1024
+
+alpha_sensitivity:
+  grid_fine:   {start: 0.01, stop: 0.31, step: 0.01}
+  grid_coarse: [0.05, 0.10, 0.15, 0.20]
+  transitions: [[0.05, 0.10], [0.10, 0.15], [0.15, 0.20]]
+  fcod_features: [fico_n, dti_n]
+  fcod:
+    n_grid: 50
+    percentile_range: [5, 95]
+    sigma: 2.0
+
+exact_shapley:
+  n_exact: 1000
+  reference_run_id: null

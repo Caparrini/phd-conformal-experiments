@@ -34,8 +34,7 @@ def _():
 
     mlflow_config = load_mlflow_config()
     mlflow_config.validate_and_log()
-
-    return mlflow_config
+    return (mlflow_config,)
 
 
 @app.cell
