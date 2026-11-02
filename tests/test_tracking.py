@@ -155,7 +155,11 @@ class TestTrackedRun:
             pass
 
         mock_mlflow.set_experiment.assert_called_once_with("test-experiment")
-        mock_mlflow.start_run.assert_called_once_with(run_name="test-run")
+        # tracked_run abre el run dentro del experimento que acaba de fijar.
+        experiment_id = mock_mlflow.get_experiment_by_name.return_value.experiment_id
+        mock_mlflow.start_run.assert_called_once_with(
+            run_name="test-run", experiment_id=experiment_id
+        )
 
         tag_calls = {
             call.args[0]: call.args[1] for call in mock_mlflow.set_tag.call_args_list
@@ -240,7 +244,6 @@ class TestPurgeExperiment:
         purge_experiment("my-experiment")
 
         rename_call = client.rename_experiment.call_args
-        delete_call = client.delete_experiment.call_args
 
         # rename must happen before delete
         rename_idx = [c[0] for c in client.method_calls].index("rename_experiment")

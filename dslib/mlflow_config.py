@@ -10,9 +10,8 @@ Quick Start:
 """
 
 import os
-import sys
-import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal, Optional
 
 import requests
@@ -23,6 +22,9 @@ from mlflow.entities import Run
 
 # Global singleton instance of MLflowConfig (lazy-loaded)
 _ACTIVE_CONFIG: Optional["MLflowConfig"] = None
+
+# Tracking URIs that need no server: they are always considered reachable.
+_LOCAL_URI_PREFIXES = ("file:", "sqlite:")
 
 
 class MLflowConfigError(Exception):
@@ -40,7 +42,7 @@ class MLflowConfig:
     """MLflow tracking configuration.
     
     Attributes:
-        tracking_uri: MLflow server URI (http://host:port or file:/path).
+        tracking_uri: MLflow server URI (http://host:port, file:/path or sqlite:///path).
         mode: Fallback strategy:
             - "local": only file-based tracking (file://...)
             - "remote": require server connection, fail if unavailable
@@ -54,6 +56,9 @@ class MLflowConfig:
     mode: Literal["local", "remote", "flexible"]
     artifact_store: Literal["local", "mlflow-server"]
     _client: Optional[MlflowClient] = None
+    # Where new experiments store their artifacts. With a sqlite backend MLflow
+    # defaults to ./mlruns relative to the working directory, so pin it here.
+    artifact_root: Optional[str] = None
     
     def get_client(self) -> MlflowClient:
         """Get or create MLflow client."""
@@ -120,7 +125,12 @@ class MLflowConfig:
         experiment = client.get_experiment_by_name(experiment_name)
         
         if experiment is None:
-            experiment_id = client.create_experiment(experiment_name)
+            if self.artifact_root:
+                experiment_id = client.create_experiment(
+                    experiment_name, artifact_location=self.artifact_root
+                )
+            else:
+                experiment_id = client.create_experiment(experiment_name)
             logger.debug(f"[MLflow] Created experiment '{experiment_name}' (ID: {experiment_id})")
         else:
             experiment_id = experiment.experiment_id
@@ -151,12 +161,28 @@ def load_mlflow_config() -> MLflowConfig:
         )
     
     # Infer artifact store from tracking URI
-    artifact_store = "local" if tracking_uri.startswith("file:") else "mlflow-server"
+    artifact_store = "local" if tracking_uri.startswith(_LOCAL_URI_PREFIXES) else "mlflow-server"
     
     return MLflowConfig(
         tracking_uri=tracking_uri,
         mode=mode,
         artifact_store=artifact_store,
+    )
+
+
+def local_mlflow_config(experiment_dir: str | Path) -> MLflowConfig:
+    """Self-contained local tracking inside ``experiment_dir``.
+
+    Runs go to ``mlflow.db`` (sqlite) and artifacts to ``mlartifacts/``, both
+    next to the experiment. It ignores ``MLFLOW_TRACKING_URI``, so the result
+    is the same on every machine and never touches a shared server.
+    """
+    experiment_dir = Path(experiment_dir).resolve()
+    return MLflowConfig(
+        tracking_uri=f"sqlite:///{experiment_dir / 'mlflow.db'}",
+        mode="local",
+        artifact_store="local",
+        artifact_root=(experiment_dir / "mlartifacts").as_uri(),
     )
 
 
@@ -189,8 +215,8 @@ def _validate_tracking_uri(tracking_uri: str) -> bool:
     Returns:
         True if server is accessible, False otherwise
     """
-    if tracking_uri.startswith("file:"):
-        # Local file-based tracking is always "available"
+    if tracking_uri.startswith(_LOCAL_URI_PREFIXES):
+        # Local file or sqlite tracking is always "available"
         return True
     
     try:

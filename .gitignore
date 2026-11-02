@@ -38,3 +38,10 @@ logs/
 # Local macOS / SQLite artifacts
 .DS_Store
 *.db
+
+# MLflow local tracking (experiments/*/mlartifacts, mlruns)
+mlartifacts/
+mlruns/
+
+# funcas: los resultados se regeneran con experiments/funcas/run.sh
+experiments/funcas/results/

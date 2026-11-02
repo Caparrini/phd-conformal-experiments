@@ -13,6 +13,7 @@ from dslib.mlflow_config import (
     MLflowConnectivityError,
     _validate_tracking_uri,
     load_mlflow_config,
+    local_mlflow_config,
     reset_active_config,
 )
 
@@ -24,6 +25,10 @@ class TestValidateTrackingUri:
         """Local file:// URIs are always considered valid."""
         assert _validate_tracking_uri("file:.") is True
         assert _validate_tracking_uri("file:./mlruns") is True
+
+    def test_sqlite_uri_always_valid(self):
+        """sqlite:/// URIs need no server."""
+        assert _validate_tracking_uri("sqlite:////tmp/mlflow.db") is True
 
     @mock.patch("requests.head")
     def test_remote_uri_accessible(self, mock_head):
@@ -226,6 +231,42 @@ class TestMlflowConfigGetOrCreateExperiment:
         assert exp_id == "exp_456"
         mock_client.get_experiment_by_name.assert_called_once_with("new-experiment")
         mock_client.create_experiment.assert_called_once_with("new-experiment")
+
+
+class TestLocalMlflowConfig:
+    """Tests for local_mlflow_config()."""
+
+    def test_paths_live_inside_the_experiment_dir(self, tmp_path):
+        config = local_mlflow_config(tmp_path)
+        assert config.tracking_uri == f"sqlite:///{tmp_path.resolve() / 'mlflow.db'}"
+        assert config.artifact_root == (tmp_path.resolve() / "mlartifacts").as_uri()
+        assert config.mode == "local"
+        assert config.artifact_store == "local"
+
+    @mock.patch.dict(os.environ, {"MLFLOW_TRACKING_URI": "http://somewhere:5000"})
+    def test_ignores_the_environment(self, tmp_path):
+        assert local_mlflow_config(tmp_path).tracking_uri.startswith("sqlite:///")
+
+    @mock.patch("dslib.mlflow_config.MlflowClient")
+    @mock.patch("mlflow.set_tracking_uri")
+    def test_new_experiments_use_the_artifact_root(self, mock_set_uri, mock_client_class, tmp_path):
+        mock_client = mock.MagicMock()
+        mock_client_class.return_value = mock_client
+        mock_client.get_experiment_by_name.return_value = None
+        mock_client.create_experiment.return_value = "exp_1"
+
+        config = local_mlflow_config(tmp_path)
+        config.get_or_create_experiment("funcas")
+
+        mock_client.create_experiment.assert_called_once_with(
+            "funcas", artifact_location=config.artifact_root
+        )
+
+    def test_validate_does_not_fall_back(self, tmp_path):
+        config = local_mlflow_config(tmp_path)
+        with mock.patch("mlflow.set_tracking_uri") as mock_set_uri:
+            config.validate_and_log()
+        mock_set_uri.assert_called_with(f"sqlite:///{tmp_path.resolve() / 'mlflow.db'}")
 
 
 @mock.patch.dict(os.environ, {
